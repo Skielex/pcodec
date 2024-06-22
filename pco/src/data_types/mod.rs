@@ -41,6 +41,7 @@ pub(crate) trait FloatLike:
   const PRECISION_BITS: Bitlen;
   const ZERO: Self;
   const MAX_FOR_SAMPLING: Self;
+  const EXP2_LUT: [Self; 128];
 
   fn abs(self) -> Self;
   fn inv(self) -> Self;
