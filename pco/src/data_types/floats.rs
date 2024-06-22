@@ -1,6 +1,7 @@
 use std::mem;
 
 use half::f16;
+use num_traits::{AsPrimitive, Float};
 
 use crate::constants::Bitlen;
 use crate::data_types::{split_latents_classic, FloatLike, Latent, NumberLike};
@@ -37,9 +38,9 @@ fn choose_mode_and_split_latents<F: FloatLike>(
         }
       }
       (FloatMultSpec::Provided(base_f64), _) => {
-        let base = F::from_f64(base_f64);
+        let base: F = F::from_f64(base_f64).unwrap();
         let mode = Mode::float_mult(base);
-        let latents = float_mult_utils::split_latents(nums, base, base.inv());
+        let latents = float_mult_utils::split_latents(nums, base, base.recip());
         (mode, latents)
       }
       (FloatMultSpec::Disabled, FloatQuantSpec::Provided(k)) => (
@@ -55,52 +56,23 @@ fn choose_mode_and_split_latents<F: FloatLike>(
 }
 
 macro_rules! impl_float_like {
-  ($t: ty, $latent: ty, $bits: expr, $exp_offset: expr) => {
+  ($t: ty, $latent: ty, $bits: expr, $exp_offset: expr, $zero: expr, $max_for_sampling: expr) => {
     impl FloatLike for $t {
       const BITS: Bitlen = $bits;
       /// Number of bits in the representation of the significand, excluding the implicit
       /// leading bit.  (In Rust, `MANTISSA_DIGITS` does include the implicit leading bit.)
       const PRECISION_BITS: Bitlen = Self::MANTISSA_DIGITS as Bitlen - 1;
-      const ZERO: Self = 0.0;
-      const MAX_FOR_SAMPLING: Self = Self::MAX * 0.5;
+      const ZERO: Self = $zero;
+      const MAX_FOR_SAMPLING: Self = $max_for_sampling;
 
       #[inline]
-      fn abs(self) -> Self {
-        self.abs()
-      }
-
-      fn inv(self) -> Self {
-        1.0 / self
-      }
-
-      #[inline]
-      fn round(self) -> Self {
-        self.round()
-      }
-
-      #[inline]
-      fn exp2(power: i32) -> Self {
-        Self::exp2(power as Self)
-      }
-
-      #[inline]
-      fn from_f64(x: f64) -> Self {
-        x as Self
-      }
-
-      #[inline]
-      fn to_f64(self) -> f64 {
-        self as f64
+      fn exp2_int(power: i32) -> Self {
+        Self::exp2(power.as_())
       }
 
       #[inline]
       fn is_finite_and_normal(&self) -> bool {
-        self.is_finite() && !self.is_subnormal()
-      }
-
-      #[inline]
-      fn is_sign_positive_(&self) -> bool {
-        self.is_sign_positive()
+        self.is_finite() && self.is_normal()
       }
 
       #[inline]
@@ -111,16 +83,6 @@ macro_rules! impl_float_like {
       #[inline]
       fn trailing_zeros(&self) -> u32 {
         self.to_bits().trailing_zeros()
-      }
-
-      #[inline]
-      fn max(a: Self, b: Self) -> Self {
-        Self::max(a, b)
-      }
-
-      #[inline]
-      fn min(a: Self, b: Self) -> Self {
-        Self::min(a, b)
       }
 
       #[inline]
@@ -138,9 +100,10 @@ macro_rules! impl_float_like {
         };
         let gpi = 1 << Self::MANTISSA_DIGITS;
         let abs_float = if abs_int < gpi {
-          abs_int as Self
+          abs_int.as_()
         } else {
-          Self::from_bits((gpi as Self).to_bits() + (abs_int - gpi))
+          let gpi_float: Self = gpi.as_();
+          Self::from_bits((gpi_float).to_bits() + (abs_int - gpi))
         };
         if negative {
           -abs_float
@@ -153,9 +116,9 @@ macro_rules! impl_float_like {
       fn int_float_to_latent(self) -> Self::L {
         let abs = self.abs();
         let gpi = 1 << Self::MANTISSA_DIGITS;
-        let gpi_float = gpi as Self;
-        let abs_int = if abs < gpi_float {
-          abs as Self::L
+        let gpi_float: Self = gpi.as_();
+        let abs_int: Self::L = if abs < gpi_float {
+          abs.as_()
         } else {
           gpi + (abs.to_bits() - gpi_float.to_bits())
         };
@@ -169,125 +132,10 @@ macro_rules! impl_float_like {
 
       #[inline]
       fn from_latent_numerical(l: Self::L) -> Self {
-        l as Self
+        l.as_()
       }
     }
   };
-}
-
-impl FloatLike for f16 {
-  const BITS: Bitlen = 16;
-  const PRECISION_BITS: Bitlen = Self::MANTISSA_DIGITS as Bitlen - 1;
-  const ZERO: Self = f16::ZERO;
-  const MAX_FOR_SAMPLING: Self = f16::from_bits(30719); // Half of MAX size.
-
-  #[inline]
-  fn abs(self) -> Self {
-    Self::from_bits(self.to_bits() & 0x7FFF)
-  }
-
-  fn inv(self) -> Self {
-    Self::ONE / self
-  }
-
-  #[inline]
-  fn round(self) -> Self {
-    Self::from_f32(self.to_f32().round())
-  }
-
-  #[inline]
-  fn exp2(power: i32) -> Self {
-    Self::from_f32(f32::exp2(power as f32))
-  }
-
-  #[inline]
-  fn from_f64(x: f64) -> Self {
-    Self::from_f64(x)
-  }
-
-  #[inline]
-  fn to_f64(self) -> f64 {
-    self.to_f64()
-  }
-
-  #[inline]
-  fn is_finite_and_normal(&self) -> bool {
-    self.is_finite() && self.is_normal()
-  }
-
-  #[inline]
-  fn is_sign_positive_(&self) -> bool {
-    self.is_sign_positive()
-  }
-
-  #[inline]
-  fn exponent(&self) -> i32 {
-    (self.abs().to_bits() >> Self::PRECISION_BITS) as i32 - 15
-  }
-
-  #[inline]
-  fn trailing_zeros(&self) -> u32 {
-    self.to_bits().trailing_zeros()
-  }
-
-  #[inline]
-  fn max(a: Self, b: Self) -> Self {
-    Self::max(a, b)
-  }
-
-  #[inline]
-  fn min(a: Self, b: Self) -> Self {
-    Self::min(a, b)
-  }
-
-  #[inline]
-  fn to_latent_bits(self) -> Self::L {
-    self.to_bits()
-  }
-
-  #[inline]
-  fn int_float_from_latent(l: Self::L) -> Self {
-    let mid = Self::L::MID;
-    let (negative, abs_int) = if l >= mid {
-      (false, l - mid)
-    } else {
-      (true, mid - 1 - l)
-    };
-    let gpi = 1 << Self::MANTISSA_DIGITS;
-    let abs_float = if abs_int < gpi {
-      Self::from_f32(abs_int as f32)
-    } else {
-      Self::from_bits(Self::from_f32(gpi as f32).to_bits() + (abs_int - gpi))
-    };
-    if negative {
-      -abs_float
-    } else {
-      abs_float
-    }
-  }
-
-  #[inline]
-  fn int_float_to_latent(self) -> Self::L {
-    let abs = self.abs();
-    let gpi = 1 << Self::MANTISSA_DIGITS;
-    let gpi_float = Self::from_f32(gpi as f32);
-    let abs_int = if abs < gpi_float {
-      abs.to_f32() as Self::L
-    } else {
-      gpi + (abs.to_bits() - gpi_float.to_bits())
-    };
-    if self.is_sign_positive() {
-      Self::L::MID + abs_int
-    } else {
-      // -1 because we need to distinguish -0.0 from +0.0
-      Self::L::MID - 1 - abs_int
-    }
-  }
-
-  #[inline]
-  fn from_latent_numerical(l: Self::L) -> Self {
-    Self::from_f32(l as f32)
-  }
 }
 
 macro_rules! impl_float_number_like {
@@ -366,8 +214,16 @@ macro_rules! impl_float_number_like {
   };
 }
 
-impl_float_like!(f32, u32, 32, -127);
-impl_float_like!(f64, u64, 64, -1023);
+impl_float_like!(f32, u32, 32, -127, 0.0, f32::MAX * 0.5);
+impl_float_like!(f64, u64, 64, -1023, 0.0, f64::MAX * 0.5);
+impl_float_like!(
+  f16,
+  u16,
+  16,
+  -15,
+  f16::ZERO,
+  f16::from_bits(30719)
+);
 // f16 FloatLike is implemented separately because it's non-native.
 impl_float_number_like!(f32, u32, 1_u32 << 31, 5);
 impl_float_number_like!(f64, u64, 1_u64 << 63, 6);

@@ -71,7 +71,7 @@ const REQUIRED_GCD_PAIR_FREQUENCY: f64 = 0.001;
 
 fn insignificant_float_to<F: FloatLike>(x: F) -> F {
   let spare_precision_bits = F::PRECISION_BITS.saturating_sub(REQUIRED_PRECISION_BITS) as i32;
-  x * F::exp2(-spare_precision_bits)
+  x * F::exp2_int(-spare_precision_bits)
 }
 
 fn is_approx_zero<F: FloatLike>(small: F, big: F) -> bool {
@@ -79,11 +79,11 @@ fn is_approx_zero<F: FloatLike>(small: F, big: F) -> bool {
 }
 
 fn is_small_remainder<F: FloatLike>(remainder: F, original: F) -> bool {
-  remainder <= original * F::exp2(-16)
+  remainder <= original * F::exp2_int(-16)
 }
 
 fn is_imprecise<F: FloatLike>(value: F, err: F) -> bool {
-  value <= err * F::exp2(REQUIRED_PRECISION_BITS as i32)
+  value <= err * F::exp2_int(REQUIRED_PRECISION_BITS as i32)
 }
 
 fn approx_pair_gcd<F: FloatLike>(greater: F, lesser: F) -> Option<F> {
@@ -97,7 +97,7 @@ fn approx_pair_gcd<F: FloatLike>(greater: F, lesser: F) -> Option<F> {
     err: F,
   }
 
-  let machine_eps = F::exp2(-(F::PRECISION_BITS as i32));
+  let machine_eps = F::exp2_int(-(F::PRECISION_BITS as i32));
   let rem_assign = |lhs: &mut PairMult<F>, rhs: &PairMult<F>| {
     let ratio = (lhs.value / rhs.value).round();
     lhs.err += ratio * rhs.err + lhs.value * machine_eps;
@@ -175,7 +175,7 @@ fn choose_candidate_base_by_trailing_zeros<F: FloatLike>(
     let int_base = int_mult_utils::choose_candidate_base(&mut int_sample)
       .map(|(base, _)| base)
       .unwrap_or(F::L::ONE);
-    let base = F::from_latent_numerical(int_base) * F::exp2(k);
+    let base = F::from_latent_numerical(int_base) * F::exp2_int(k);
     Some(FloatMultConfig::from_base(base))
   } else {
     None
@@ -206,7 +206,7 @@ fn approx_sample_gcd_euclidean<F: FloatLike>(sample: &[F]) -> Option<F> {
     let candidate = gcds[(percentile * gcds.len() as f64) as usize];
     let similar_gcd_count = gcds
       .iter()
-      .filter(|&&gcd| (gcd - candidate).abs() < F::from_f64(0.01) * candidate)
+      .filter(|&&gcd| (gcd - candidate).abs() < F::from_f64(0.01).unwrap() * candidate)
       .count();
 
     if similar_gcd_count >= required_pairs_with_common_gcd {
@@ -231,7 +231,7 @@ fn center_sample_base<F: FloatLike>(base: F, sample: &[F]) -> F {
   // Ideally we would tweak by something between the weighted median and mode
   // of the individual tweaks, since we model loss as proportional to
   // sum[log|error|], but doing so would be computationally harder.
-  let inv_base = base.inv();
+  let inv_base = base.recip();
   let mut tweak_sum = F::ZERO;
   let mut tweak_weight = F::ZERO;
   for &x in sample {
@@ -239,7 +239,7 @@ fn center_sample_base<F: FloatLike>(base: F, sample: &[F]) -> F {
     let mult_exponent = mult.exponent() as Bitlen;
     if mult_exponent < F::PRECISION_BITS && mult != F::ZERO {
       let overshoot = (mult * base) - x;
-      let weight = F::from_f64((F::PRECISION_BITS - mult_exponent) as f64);
+      let weight: F = F::from_f64((F::PRECISION_BITS - mult_exponent) as f64).unwrap();
       tweak_sum += weight * (overshoot / mult);
       tweak_weight += weight;
     }
@@ -248,14 +248,15 @@ fn center_sample_base<F: FloatLike>(base: F, sample: &[F]) -> F {
 }
 
 fn snap_to_int_reciprocal<F: FloatLike>(base: F) -> FloatMultConfig<F> {
-  let inv_base = base.inv();
+  let inv_base = base.recip();
   let round_inv_base = inv_base.round();
-  let decimal_inv_base = F::from_f64(10.0_f64.powf(inv_base.to_f64().log10().round()));
+  let decimal_inv_base =
+    F::from_f64(10.0_f64.powf(inv_base.to_f64().unwrap().log10().round())).unwrap();
   // check if relative error is below a threshold
-  if (inv_base - round_inv_base).abs() < F::from_f64(SNAP_THRESHOLD_ABSOLUTE) {
+  if (inv_base - round_inv_base).abs() < F::from_f64(SNAP_THRESHOLD_ABSOLUTE).unwrap() {
     FloatMultConfig::from_inv_base(round_inv_base)
   } else if (inv_base - decimal_inv_base).abs() / inv_base
-    < F::from_f64(SNAP_THRESHOLD_DECIMAL_RELATIVE)
+    < F::from_f64(SNAP_THRESHOLD_DECIMAL_RELATIVE).unwrap()
   {
     FloatMultConfig::from_inv_base(decimal_inv_base)
   } else {
@@ -311,13 +312,13 @@ impl<F: FloatLike> FloatMultConfig<F> {
   fn from_base(base: F) -> Self {
     Self {
       base,
-      inv_base: base.inv(),
+      inv_base: base.recip(),
     }
   }
 
   fn from_inv_base(inv_base: F) -> Self {
     Self {
-      base: inv_base.inv(),
+      base: inv_base.recip(),
       inv_base,
     }
   }

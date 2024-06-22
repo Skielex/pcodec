@@ -1,9 +1,7 @@
+use num_traits::{Float, FromPrimitive, NumAssignOps, NumOps};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
-use std::ops::{
-  Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, Div, DivAssign, Mul, MulAssign, Neg,
-  Rem, RemAssign, Shl, Shr, Sub, SubAssign,
-};
+use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Shl, Shr};
 
 pub use dynamic::CoreDataType;
 
@@ -19,21 +17,13 @@ mod unsigneds;
 /// This is used internally for compressing and decompressing with
 /// [`FloatMultMode`][`crate::Mode::FloatMult`].
 pub(crate) trait FloatLike:
-  Add<Output = Self>
-  + AddAssign
-  + Copy
+  Copy
   + Debug
-  + Display
-  + Mul<Output = Self>
-  + Neg<Output = Self>
+  + Float
+  + FromPrimitive
+  + NumAssignOps
+  + NumOps
   + NumberLike
-  + PartialOrd
-  + RemAssign
-  + Send
-  + Sync
-  + Sub<Output = Self>
-  + SubAssign
-  + Div<Output = Self>
 {
   const BITS: Bitlen;
   /// Number of bits that aren't used for exponent or sign.
@@ -42,20 +32,12 @@ pub(crate) trait FloatLike:
   const ZERO: Self;
   const MAX_FOR_SAMPLING: Self;
 
-  fn abs(self) -> Self;
-  fn inv(self) -> Self;
-  fn round(self) -> Self;
-  fn exp2(power: i32) -> Self;
-  fn from_f64(x: f64) -> Self;
-  fn to_f64(self) -> f64;
+  fn exp2_int(power: i32) -> Self;
   fn is_finite_and_normal(&self) -> bool;
-  fn is_sign_positive_(&self) -> bool;
   /// Returns the float's exponent. For instance, for f32 this should be
   /// between -127 and +126.
   fn exponent(&self) -> i32;
   fn trailing_zeros(&self) -> u32;
-  fn max(a: Self, b: Self) -> Self;
-  fn min(a: Self, b: Self) -> Self;
 
   /// This should use something like [`f32::to_bits()`]
   fn to_latent_bits(self) -> Self::L;
@@ -78,28 +60,20 @@ pub(crate) trait FloatLike:
 /// corresponding `Latent` representation.
 /// Metadata stores numbers as their latent representations.
 pub trait Latent:
-  Add<Output = Self>
-  + AddAssign
-  + BitAnd<Output = Self>
+  BitAnd<Output = Self>
   + BitOr<Output = Self>
   + BitAndAssign
   + BitOrAssign
-  + Display
-  + Div<Output = Self>
-  + DivAssign
   + Hash
-  + Mul<Output = Self>
-  + MulAssign
+  + NumOps
+  + NumAssignOps
   + NumberLike<L = Self>
   + Ord
   + PartialOrd
-  + Rem<Output = Self>
-  + RemAssign
   + Send
   + Sync
   + Shl<Bitlen, Output = Self>
   + Shr<Bitlen, Output = Self>
-  + Sub<Output = Self>
 {
   const ZERO: Self;
   const ONE: Self;

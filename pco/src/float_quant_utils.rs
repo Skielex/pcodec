@@ -43,7 +43,7 @@ pub(crate) fn split_latents<F: FloatLike>(page_nums: &[F], k: Bitlen) -> Vec<Vec
     // In the common case where `num` is exactly quantized, we want `*secondary_dst` to always be
     // zero.  But when `num` is negative, `lowest_k_bits == lowest_k_bits_max`.  So we manually
     // flip it here, and un-flip it in `join_latents`.
-    *secondary_dst = if num.is_sign_positive_() {
+    *secondary_dst = if num.is_sign_positive() {
       lowest_k_bits
     } else {
       lowest_k_bits_max - lowest_k_bits
