@@ -329,6 +329,7 @@ impl FloatLike for f16 {
 
   #[inline]
   fn exp2(power: i32) -> Self {
+    // Self::from_f32(f32::exp2(power as f32))
     Self::EXP2_LUT[(power + 64) as usize]
   }
 
