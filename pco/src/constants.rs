@@ -2,7 +2,7 @@
 // u32 is performant because it aligns with other things and doesn't require
 // masking
 // exposed in public API
-pub(crate) type Bitlen = u32;
+pub(crate) type Bitlen = u16;
 // must be u32 or larger
 // exposed in public API
 pub(crate) type Weight = u32;
@@ -66,7 +66,7 @@ mod tests {
   use crate::constants::*;
 
   fn bits_to_encode(max_value: usize) -> Bitlen {
-    usize::BITS - max_value.leading_zeros()
+    usize::BITS as Bitlen - (max_value.leading_zeros()) as Bitlen
   }
 
   fn assert_can_encode(n_bits: Bitlen, max_number: usize) {

@@ -1,3 +1,4 @@
+use crate::constants::Bitlen;
 use crate::data_types::Number;
 use crate::errors::PcoResult;
 use crate::{standalone, ChunkConfig, DeltaSpec, ModeSpec};
@@ -170,7 +171,7 @@ fn v0_3_0_float_quant() -> PcoResult<()> {
     })
     .collect::<Vec<_>>();
   let config = ChunkConfig::default().with_mode_spec(ModeSpec::TryFloatQuant(
-    f32::MANTISSA_DIGITS - f16::MANTISSA_DIGITS,
+    (f32::MANTISSA_DIGITS - f16::MANTISSA_DIGITS) as Bitlen,
   ));
   simple_write_if_version_matches::<f32>(version, name, &nums, &config)?;
   assert_compatible(version, name, &nums)?;

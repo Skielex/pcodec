@@ -17,7 +17,7 @@ impl DynLatent {
     match_latent_enum!(
       &self,
       DynLatent<L>(_latent) => {
-        L::BITS
+        L::BITS as Bitlen
       }
     )
   }
@@ -30,7 +30,7 @@ impl DynLatent {
     match_latent_enum!(
       &self,
       DynLatent<L>(latent) => {
-        writer.write_uint(*latent, L::BITS);
+        writer.write_uint(*latent, L::BITS as Bitlen);
       }
     );
   }

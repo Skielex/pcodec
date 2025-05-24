@@ -130,7 +130,7 @@ pub(crate) fn estimate_best_k_and_bits_saved<F: Float>(sample: &[F]) -> (Bitlen,
   for x in sample {
     // Using the fact that significand bits come last in
     // the floating-point representations we care about
-    let trailing_mantissa_zeros = cmp::min(F::PRECISION_BITS, x.trailing_zeros());
+    let trailing_mantissa_zeros = cmp::min(F::PRECISION_BITS, x.trailing_zeros() as Bitlen);
     hist[trailing_mantissa_zeros as usize] += 1
   }
 
@@ -223,7 +223,7 @@ mod test {
 
   #[test]
   fn test_secondary_is_zero_for_exact_quantized() {
-    let k: Bitlen = f64::MANTISSA_DIGITS - f32::MANTISSA_DIGITS;
+    let k: Bitlen = (f64::MANTISSA_DIGITS - f32::MANTISSA_DIGITS) as Bitlen;
     let nums: Vec<f64> = [-2.345f32, -1.234f32, -0.0f32, 0.0f32, 1.234f32, 2.345f32]
       .iter()
       .map(|&num| num as f64)

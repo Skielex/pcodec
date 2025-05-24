@@ -2,6 +2,7 @@ use std::io::Write;
 
 use crate::bit_writer::BitWriter;
 use crate::chunk_config::PagingSpec;
+use crate::constants::Bitlen;
 use crate::data_types::Number;
 use crate::errors::PcoResult;
 use crate::metadata::ChunkMeta;
@@ -9,7 +10,7 @@ use crate::standalone::constants::*;
 use crate::{bits, wrapped, ChunkConfig};
 
 unsafe fn write_varint<W: Write>(n: u64, writer: &mut BitWriter<W>) {
-  let power = if n == 0 { 1 } else { n.ilog2() + 1 };
+  let power = if n == 0 { 1 } else { n.ilog2() + 1 } as Bitlen;
   writer.write_uint(power - 1, BITS_TO_ENCODE_VARINT_POWER);
   writer.write_uint(bits::lowest_bits(n, power), power);
 }

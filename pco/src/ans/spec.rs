@@ -82,12 +82,12 @@ impl Spec {
 #[cfg(test)]
 mod tests {
   use crate::ans::spec::{Spec, Symbol};
-  use crate::constants::Weight;
+  use crate::constants::{Bitlen, Weight};
   use crate::errors::PcoResult;
 
   fn assert_state_symbols(weights: Vec<Weight>, expected: Vec<Symbol>) -> PcoResult<()> {
     let table_size_log = weights.iter().sum::<Weight>().ilog2();
-    let spec = Spec::from_weights(table_size_log, weights)?;
+    let spec = Spec::from_weights(table_size_log as Bitlen, weights)?;
     assert_eq!(spec.state_symbols, expected);
     Ok(())
   }

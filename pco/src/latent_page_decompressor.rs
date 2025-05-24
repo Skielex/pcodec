@@ -106,7 +106,7 @@ impl<L: Latent> LatentPageDecompressor<L> {
         state.offset_bits_scratch[i] = bin.offset_bits;
         state.offset_bits_csum_scratch[i] = csum;
         state.lowers_scratch[i] = bin.lower;
-        csum += bin.offset_bits;
+        csum += bin.offset_bits as Bitlen;
       }
     }
 

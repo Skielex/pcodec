@@ -28,7 +28,7 @@ impl PyModeSpec {
 
   /// :returns: a ModeSpec that tries to use the IntMult mode with the given base, if possible.
   #[staticmethod]
-  fn try_float_quant(k: u32) -> Self {
+  fn try_float_quant(k: u16) -> Self {
     Self(ModeSpec::TryFloatQuant(k))
   }
 

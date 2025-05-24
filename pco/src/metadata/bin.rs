@@ -23,7 +23,7 @@ impl<L: Latent> Bin<L> {
 
   #[inline]
   pub(crate) fn worst_case_bits_per_latent(&self, ans_size_log: Bitlen) -> Bitlen {
-    self.offset_bits + ans_size_log - self.weight.ilog2()
+    self.offset_bits + ans_size_log - self.weight.ilog2() as Bitlen
   }
 }
 

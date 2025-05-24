@@ -95,7 +95,7 @@ fn build_latent_var_summaries<T: Number>(meta: &ChunkMeta) -> BTreeMap<String, L
           bin_summaries.push(BinSummary {
             weight: bin.weight,
             lower: format!("{}{}", describer.latent(DynLatent::new(bin.lower).unwrap()), unit),
-            offset_bits: bin.offset_bits,
+            offset_bits: bin.offset_bits as u32,
           });
           let weight = bin.weight as f64;
           approx_total_bits += weight * (bin.offset_bits as f64 + latent_var_meta.ans_size_log as f64 - weight.log2());
@@ -113,7 +113,7 @@ fn build_latent_var_summaries<T: Number>(meta: &ChunkMeta) -> BTreeMap<String, L
     let summary = LatentVarSummary {
       name: describer.latent_var(),
       n_bins,
-      ans_size_log: latent_var_meta.ans_size_log,
+      ans_size_log: latent_var_meta.ans_size_log as u32,
       approx_avg_bits: approx_total_bits / total_weight,
       bins: bins_table.to_string(),
     };

@@ -94,7 +94,7 @@ fn train_infos<L: Latent>(
       (unoptimized_bins_log + 2) as Bitlen,
       MAX_COMPRESSION_LEVEL as Bitlen,
     ),
-    n_log_ceil,
+    n_log_ceil as Bitlen,
   );
 
   let mut optimized_infos =

@@ -142,7 +142,7 @@ fn find_best_lookback<L: Latent>(
         *latents.get_unchecked(i - lookback),
       )
     };
-    let lookback_goodness = Bitlen::BITS - lookback_count.leading_zeros();
+    let lookback_goodness = (Bitlen::BITS - lookback_count.leading_zeros()) as Bitlen;
     let delta = L::min(l.wrapping_sub(other), other.wrapping_sub(l));
     let delta_goodness = delta.leading_zeros();
     let goodness = lookback_goodness + delta_goodness;

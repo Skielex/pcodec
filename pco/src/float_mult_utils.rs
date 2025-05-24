@@ -149,7 +149,7 @@ fn choose_config_by_trailing_zeros<F: Float>(sample: &[F]) -> Option<FloatMultCo
   for x in sample {
     let trailing_zeros = x.trailing_zeros();
     if *x != F::ZERO && trailing_zeros >= INTERESTING_TRAILING_ZEROS {
-      let k_prime = calc_power_of_2_divisor(x.exponent(), trailing_zeros);
+      let k_prime = calc_power_of_2_divisor(x.exponent(), trailing_zeros as Bitlen);
       count += 1;
       k = min(k, k_prime);
     }
@@ -169,9 +169,9 @@ fn choose_config_by_trailing_zeros<F: Float>(sample: &[F]) -> Option<FloatMultCo
   for x in sample {
     let exponent = x.exponent();
     // the greatest k' such that 2^k' divides this float exactly
-    let k_prime = calc_power_of_2_divisor(x.exponent(), x.trailing_zeros());
+    let k_prime = calc_power_of_2_divisor(x.exponent(), x.trailing_zeros() as Bitlen);
     if k_prime >= k && exponent < k + F::L::BITS as i32 {
-      let rshift = F::L::BITS - 1 - (exponent - k) as u32;
+      let rshift = F::L::BITS - 1 - (exponent - k) as Bitlen;
       let lshifted_w_explicit_mantissa = (x.to_latent_bits() << lshift) | explicit_mantissa;
       let multiple_of_k = lshifted_w_explicit_mantissa >> rshift;
       int_sample.push(multiple_of_k);

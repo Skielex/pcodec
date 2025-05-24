@@ -55,7 +55,7 @@ pub trait ReadWriteUint:
 
 impl ReadWriteUint for usize {
   const ONE: Self = 1;
-  const BITS: Bitlen = usize::BITS;
+  const BITS: Bitlen = usize::BITS as Bitlen;
 
   #[inline]
   fn from_u64(x: u64) -> Self {
