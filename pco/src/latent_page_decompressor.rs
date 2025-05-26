@@ -143,7 +143,7 @@ impl<L: Latent> LatentPageDecompressor<L> {
     let [mut state_idx_0, mut state_idx_1, mut state_idx_2, mut state_idx_3] =
       self.state.ans_state_idxs;
     let infos = self.infos.as_slice();
-    let ans_nodes = self.decoder.nodes.as_slice();
+    // let ans_nodes = self.decoder.nodes.as_slice();
     for base_i in (0..FULL_BATCH_N).step_by(ANS_INTERLEAVING) {
       stale_byte_idx += bits_past_byte as usize / 8;
       bits_past_byte %= 8;
@@ -155,13 +155,26 @@ impl<L: Latent> LatentPageDecompressor<L> {
       macro_rules! handle_single_symbol {
         ($j: expr, $state_idx: ident) => {
           let i = base_i + $j;
-          let node = unsafe { ans_nodes.get_unchecked($state_idx as usize) };
-          let ans_val = (packed >> bits_past_byte) as AnsState & ((1 << node.bits_to_read) - 1);
-          let info = unsafe { infos.get_unchecked(node.symbol as usize) };
+          // let node = unsafe { ans_nodes.get_unchecked($state_idx as usize) };
+          let symbol = unsafe { *self.decoder.symbols.get_unchecked($state_idx as usize) };
+          let next_state_idx_base = unsafe {
+            *self
+              .decoder
+              .next_state_idx_bases
+              .get_unchecked($state_idx as usize)
+          };
+          let bits_to_read = unsafe {
+            *self
+              .decoder
+              .bits_to_reads
+              .get_unchecked($state_idx as usize)
+          };
+          let ans_val = (packed >> bits_past_byte) as AnsState & ((1 << bits_to_read) - 1);
+          let info = unsafe { infos.get_unchecked(symbol as usize) };
           self.state.set_scratch(i, offset_bit_idx, info);
-          bits_past_byte += node.bits_to_read;
+          bits_past_byte += bits_to_read as Bitlen;
           offset_bit_idx += info.offset_bits;
-          $state_idx = node.next_state_idx_base + ans_val;
+          $state_idx = next_state_idx_base as u32 + ans_val;
         };
       }
       handle_single_symbol!(0, state_idx_0);
@@ -189,13 +202,27 @@ impl<L: Latent> LatentPageDecompressor<L> {
       stale_byte_idx += bits_past_byte as usize / 8;
       bits_past_byte %= 8;
       let packed = bit_reader::u64_at(src, stale_byte_idx);
-      let node = unsafe { self.decoder.nodes.get_unchecked(state_idxs[j] as usize) };
-      let ans_val = (packed >> bits_past_byte) as AnsState & ((1 << node.bits_to_read) - 1);
-      let info = &self.infos[node.symbol as usize];
+      // let node = unsafe { self.decoder.nodes.get_unchecked(state_idxs[j] as usize) };
+      let symbol = unsafe { *self.decoder.symbols.get_unchecked(state_idxs[j] as usize) };
+      let next_state_idx_base = unsafe {
+        *self
+          .decoder
+          .next_state_idx_bases
+          .get_unchecked(state_idxs[j] as usize)
+      };
+      let bits_to_read = unsafe {
+        *self
+          .decoder
+          .bits_to_reads
+          .get_unchecked(state_idxs[j] as usize)
+      };
+
+      let ans_val = (packed >> bits_past_byte) as AnsState & ((1 << bits_to_read) - 1);
+      let info = &self.infos[symbol as usize];
       self.state.set_scratch(i, offset_bit_idx, info);
-      bits_past_byte += node.bits_to_read;
+      bits_past_byte += bits_to_read as Bitlen;
       offset_bit_idx += info.offset_bits;
-      state_idxs[j] = node.next_state_idx_base + ans_val;
+      state_idxs[j] = next_state_idx_base as u32 + ans_val;
     }
 
     reader.stale_byte_idx = stale_byte_idx;
