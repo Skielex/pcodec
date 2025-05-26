@@ -209,22 +209,45 @@ impl<L: Latent> LatentPageDecompressor<L> {
         u32::cast_signed(node0.bits_to_read),
       );
 
+      let offset_bits_vec = _mm_set_epi32(
+        info3.offset_bits as i32,
+        info2.offset_bits as i32,
+        info1.offset_bits as i32,
+        info0.offset_bits as i32,
+      );
+
+      // let offset_bit_idx_vec = _mm_set_epi32(
+      //   offset_bit_idx2 as i32,
+      //   offset_bit_idx1 as i32,
+      //   offset_bit_idx0 as i32,
+      //   offset_bit_idx as i32,
+      // );
+
+      // let offset_bit_idx_vec = _mm_add_epi32(offset_bit_idx_vec, offset_bits_vec);
+
       let offset_bit_idx0 = offset_bit_idx + info0.offset_bits;
       let offset_bit_idx1 = offset_bit_idx0 + info1.offset_bits;
       let offset_bit_idx2 = offset_bit_idx1 + info2.offset_bits;
       let offset_bit_idx3 = offset_bit_idx2 + info3.offset_bits;
+
+      let offset_bit_idx_vec = _mm_set_epi32(
+        offset_bit_idx2 as i32,
+        offset_bit_idx1 as i32,
+        offset_bit_idx0 as i32,
+        offset_bit_idx as i32,
+      );
 
       // Current complex approach
       let ans_val_left_vec = _mm256_srlv_epi64(packed_vec, bits_past_byte_vec);
       // let ans_val_left_vec_mask = _mm256_set1_epi64x(0xFFFF_FFFF);
       // let truncated = _mm256_and_si256(ans_val_left_vec, ans_val_left_vec_mask);
       // let low64 = _mm256_castsi256_si128(truncated);
-      // let high128 = _mm256_extracti128_si256(truncated, 1); 
+      // let high128 = _mm256_extracti128_si256(truncated, 1);
       // const SHUFFLE_MASK: i32 = 0b01000100;
       // let lo32 = _mm_shuffle_epi32(low64, SHUFFLE_MASK);
       // let hi32 = _mm_shuffle_epi32(high128, SHUFFLE_MASK);
       // let ans_val_left_vec = _mm_unpacklo_epi32(lo32, hi32);
-      
+
       let ans_val_left_vec = _mm_set_epi32(
         _mm256_extract_epi64(ans_val_left_vec, 3) as i32,
         _mm256_extract_epi64(ans_val_left_vec, 2) as i32,
@@ -244,14 +267,22 @@ impl<L: Latent> LatentPageDecompressor<L> {
       // let ans_val2 = (packed >> bits_past_byte1) as AnsState & ((1 << node2.bits_to_read) - 1);
       // let ans_val3 = (packed >> bits_past_byte2) as AnsState & ((1 << node3.bits_to_read) - 1);
 
-      *self.state.offset_bits_csum_scratch.get_unchecked_mut(i0) = offset_bit_idx;
-      *self.state.offset_bits_csum_scratch.get_unchecked_mut(i1) = offset_bit_idx0;
-      *self.state.offset_bits_csum_scratch.get_unchecked_mut(i2) = offset_bit_idx1;
-      *self.state.offset_bits_csum_scratch.get_unchecked_mut(i3) = offset_bit_idx2;
-      *self.state.offset_bits_scratch.get_unchecked_mut(i0) = info0.offset_bits;
-      *self.state.offset_bits_scratch.get_unchecked_mut(i1) = info1.offset_bits;
-      *self.state.offset_bits_scratch.get_unchecked_mut(i2) = info2.offset_bits;
-      *self.state.offset_bits_scratch.get_unchecked_mut(i3) = info3.offset_bits;
+      // *self.state.offset_bits_csum_scratch.get_unchecked_mut(i0) = offset_bit_idx;
+      // *self.state.offset_bits_csum_scratch.get_unchecked_mut(i1) = offset_bit_idx0;
+      // *self.state.offset_bits_csum_scratch.get_unchecked_mut(i2) = offset_bit_idx1;
+      // *self.state.offset_bits_csum_scratch.get_unchecked_mut(i3) = offset_bit_idx2;
+      _mm_storeu_si128(
+        self.state.offset_bits_csum_scratch.as_mut_ptr().add(i0) as *mut __m128i,
+        offset_bit_idx_vec,
+      );
+      // *self.state.offset_bits_scratch.get_unchecked_mut(i0) = info0.offset_bits;
+      // *self.state.offset_bits_scratch.get_unchecked_mut(i1) = info1.offset_bits;
+      // *self.state.offset_bits_scratch.get_unchecked_mut(i2) = info2.offset_bits;
+      // *self.state.offset_bits_scratch.get_unchecked_mut(i3) = info3.offset_bits;
+      _mm_storeu_si128(
+        self.state.offset_bits_scratch.as_mut_ptr().add(i0) as *mut __m128i,
+        offset_bits_vec,
+      );
       *self.state.lowers_scratch.get_unchecked_mut(i0) = info0.lower;
       *self.state.lowers_scratch.get_unchecked_mut(i1) = info1.lower;
       *self.state.lowers_scratch.get_unchecked_mut(i2) = info2.lower;
