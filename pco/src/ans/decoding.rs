@@ -12,9 +12,9 @@ use crate::constants::Bitlen;
 
 #[derive(Clone, Debug)]
 pub struct Decoder {
-  pub symbols: Vec<u16>,
-  pub next_state_idx_bases: Vec<u16>,
-  pub bits_to_reads: Vec<u16>,
+  pub symbols: Vec<Symbol>,
+  pub next_state_idx_bases: Vec<AnsState>,
+  pub bits_to_reads: Vec<Bitlen>,
 }
 
 impl Decoder {
@@ -38,9 +38,9 @@ impl Decoder {
       //   next_state_idx_base: next_state_base - table_size as AnsState,
       //   bits_to_read,
       // });
-      symbols.push(symbol as u16);
-      next_state_idx_bases.push((next_state_base - table_size as AnsState) as u16);
-      bits_to_reads.push(bits_to_read as u16);
+      symbols.push(symbol);
+      next_state_idx_bases.push((next_state_base - table_size as AnsState));
+      bits_to_reads.push(bits_to_read);
       symbol_x_s[symbol as usize] += 1;
     }
 

@@ -81,6 +81,9 @@ impl<L: Latent> LatentPageDecompressor<L> {
       self.state.ans_state_idxs;
     let infos = self.infos.as_slice();
     // let ans_nodes = self.decoder.nodes.as_slice();
+    let ans_symbols = self.decoder.symbols.as_slice();
+    let next_state_idx_bases = self.decoder.next_state_idx_bases.as_slice();
+    let bits_to_reads = self.decoder.bits_to_reads.as_slice();
     for base_i in (0..FULL_BATCH_N).step_by(ANS_INTERLEAVING) {
       stale_byte_idx += bits_past_byte as usize / 8;
       bits_past_byte %= 8;
@@ -89,35 +92,71 @@ impl<L: Latent> LatentPageDecompressor<L> {
       // performance gain. If I use a [AnsState; 4] for the state_idxs instead
       // of separate identifiers, it tries to repeatedly load and write to
       // the array instead of keeping the states in registers.
-      macro_rules! handle_single_symbol {
-        ($j: expr, $state_idx: ident) => {
-          let i = base_i + $j;
-          // let node = unsafe { ans_nodes.get_unchecked($state_idx as usize) };
-          let symbol = unsafe { *self.decoder.symbols.get_unchecked($state_idx as usize) };
-          let next_state_idx_base = unsafe {
-            *self
-              .decoder
-              .next_state_idx_bases
-              .get_unchecked($state_idx as usize)
-          };
-          let bits_to_read = unsafe {
-            *self
-              .decoder
-              .bits_to_reads
-              .get_unchecked($state_idx as usize)
-          };
-          let ans_val = (packed >> bits_past_byte) as AnsState & ((1 << bits_to_read) - 1);
-          let info = unsafe { infos.get_unchecked(symbol as usize) };
-          self.state.set_scratch(i, offset_bit_idx, info);
-          bits_past_byte += bits_to_read as Bitlen;
-          offset_bit_idx += info.offset_bits;
-          $state_idx = next_state_idx_base as u32 + ans_val;
-        };
-      }
-      handle_single_symbol!(0, state_idx_0);
-      handle_single_symbol!(1, state_idx_1);
-      handle_single_symbol!(2, state_idx_2);
-      handle_single_symbol!(3, state_idx_3);
+      let i0 = base_i + 0;
+      let i1 = base_i + 1;
+      let i2 = base_i + 2;
+      let i3 = base_i + 3;
+
+      let symbol0 = *ans_symbols.get_unchecked(state_idx_0 as usize);
+      let symbol1 = *ans_symbols.get_unchecked(state_idx_1 as usize);
+      let symbol2 = *ans_symbols.get_unchecked(state_idx_2 as usize);
+      let symbol3 = *ans_symbols.get_unchecked(state_idx_3 as usize);
+
+      let next_state_idx_base0 = *next_state_idx_bases.get_unchecked(state_idx_0 as usize);
+      let next_state_idx_base1 = *next_state_idx_bases.get_unchecked(state_idx_1 as usize);
+      let next_state_idx_base2 = *next_state_idx_bases.get_unchecked(state_idx_2 as usize);
+      let next_state_idx_base3 = *next_state_idx_bases.get_unchecked(state_idx_3 as usize);
+
+      let bits_to_read0 = *bits_to_reads.get_unchecked(state_idx_0 as usize);
+      let bits_to_read1 = *bits_to_reads.get_unchecked(state_idx_1 as usize);
+      let bits_to_read2 = *bits_to_reads.get_unchecked(state_idx_2 as usize);
+      let bits_to_read3 = *bits_to_reads.get_unchecked(state_idx_3 as usize);
+
+      let bits_past_byte0 = bits_past_byte;
+      let bits_past_byte1 = bits_past_byte0 + bits_to_read0;
+      let bits_past_byte2 = bits_past_byte1 + bits_to_read1;
+      let bits_past_byte3 = bits_past_byte2 + bits_to_read2;
+
+      let info0 = infos.get_unchecked(symbol0 as usize);
+      let info1 = infos.get_unchecked(symbol1 as usize);
+      let info2 = infos.get_unchecked(symbol2 as usize);
+      let info3 = infos.get_unchecked(symbol3 as usize);
+
+      let offset_bit_idx0 = offset_bit_idx;
+      let offset_bit_idx1 = offset_bit_idx0 + info0.offset_bits;
+      let offset_bit_idx2 = offset_bit_idx1 + info1.offset_bits;
+      let offset_bit_idx3 = offset_bit_idx2 + info2.offset_bits;
+
+      let ans_val0 = (packed >> bits_past_byte0) as AnsState & ((1 << bits_to_read0) - 1);
+      let ans_val1 = (packed >> bits_past_byte1) as AnsState & ((1 << bits_to_read1) - 1);
+      let ans_val2 = (packed >> bits_past_byte2) as AnsState & ((1 << bits_to_read2) - 1);
+      let ans_val3 = (packed >> bits_past_byte3) as AnsState & ((1 << bits_to_read3) - 1);
+
+      *self.state.offset_bits_csum_scratch.get_unchecked_mut(i0) = offset_bit_idx0;
+      *self.state.offset_bits_csum_scratch.get_unchecked_mut(i1) = offset_bit_idx1;
+      *self.state.offset_bits_csum_scratch.get_unchecked_mut(i2) = offset_bit_idx2;
+      *self.state.offset_bits_csum_scratch.get_unchecked_mut(i3) = offset_bit_idx3;
+      *self.state.lowers_scratch.get_unchecked_mut(i0) = info0.lower;
+      *self.state.lowers_scratch.get_unchecked_mut(i1) = info1.lower;
+      *self.state.lowers_scratch.get_unchecked_mut(i3) = info3.lower;
+      *self.state.lowers_scratch.get_unchecked_mut(i2) = info2.lower;
+      *self.state.offset_bits_scratch.get_unchecked_mut(i0) = info0.offset_bits;
+      *self.state.offset_bits_scratch.get_unchecked_mut(i1) = info1.offset_bits;
+      *self.state.offset_bits_scratch.get_unchecked_mut(i2) = info2.offset_bits;
+      *self.state.offset_bits_scratch.get_unchecked_mut(i3) = info3.offset_bits;
+
+      // self.state.set_scratch(i0, offset_bit_idx0, info0);
+      // self.state.set_scratch(i1, offset_bit_idx1, info1);
+      // self.state.set_scratch(i2, offset_bit_idx2, info2);
+      // self.state.set_scratch(i3, offset_bit_idx3, info3);
+
+      state_idx_0 = next_state_idx_base0 + ans_val0;
+      state_idx_1 = next_state_idx_base1 + ans_val1;
+      state_idx_2 = next_state_idx_base2 + ans_val2;
+      state_idx_3 = next_state_idx_base3 + ans_val3;
+
+      bits_past_byte = bits_past_byte3 + bits_to_read3;
+      offset_bit_idx = offset_bit_idx3 + info3.offset_bits;
     }
 
     reader.stale_byte_idx = stale_byte_idx;

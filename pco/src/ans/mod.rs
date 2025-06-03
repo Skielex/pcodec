@@ -21,8 +21,7 @@ mod tests {
   use crate::bit_reader::BitReader;
   use crate::bit_writer::BitWriter;
   use crate::bits;
-  use crate::constants::Bitlen;
-use crate::errors::PcoResult;
+  use crate::errors::PcoResult;
 
   fn assert_recovers(spec: &Spec, symbols: Vec<Symbol>, expected_byte_len: usize) -> PcoResult<()> {
     // ENCODE
@@ -60,7 +59,7 @@ use crate::errors::PcoResult;
       let next_state_idx_base = decoder.next_state_idx_bases[state_idx as usize];
       let bits_to_read = decoder.bits_to_reads[state_idx as usize];
       decoded.push(symbol);
-      state_idx = next_state_idx_base as u32 + unsafe { reader.read_uint::<AnsState>(bits_to_read as Bitlen) };
+      state_idx = next_state_idx_base + unsafe { reader.read_uint::<AnsState>(bits_to_read) };
     }
 
     assert_eq!(decoded, symbols);
