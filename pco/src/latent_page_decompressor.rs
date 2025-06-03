@@ -1,3 +1,5 @@
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::*;
 use std::fmt::Debug;
 
 use crate::ans::{AnsState, Spec};
@@ -67,7 +69,7 @@ pub struct LatentPageDecompressor<L: Latent> {
 impl<L: Latent> LatentPageDecompressor<L> {
   // This implementation handles only a full batch, but is faster.
   #[inline(never)]
-  unsafe fn decompress_full_ans_symbols(&mut self, reader: &mut BitReader) {
+  unsafe fn decompress_full_ans_symbols_(&mut self, reader: &mut BitReader) {
     // At each iteration, this loads a single u64 and has all ANS decoders
     // read a single symbol from it.
     // Therefore it requires that ANS_INTERLEAVING * MAX_BITS_PER_ANS <= 57.
@@ -162,6 +164,193 @@ impl<L: Latent> LatentPageDecompressor<L> {
     reader.stale_byte_idx = stale_byte_idx;
     reader.bits_past_byte = bits_past_byte;
     self.state.ans_state_idxs = [state_idx_0, state_idx_1, state_idx_2, state_idx_3];
+  }
+
+  #[inline(never)]
+  unsafe fn decompress_full_ans_symbols(&mut self, reader: &mut BitReader) {
+    // At each iteration, this loads a single u64 and has all ANS decoders
+    // read a single symbol from it.
+    // Therefore it requires that ANS_INTERLEAVING * MAX_BITS_PER_ANS <= 57.
+    // Additionally, we're unpacking all ANS states using the fact that
+    // ANS_INTERLEAVING == 4.
+    let src = reader.src;
+    let mut stale_byte_idx = reader.stale_byte_idx;
+    let mut bits_past_byte = reader.bits_past_byte;
+    let mut offset_bit_idx = 0;
+    // let [mut state_idx_0, mut state_idx_1, mut state_idx_2, mut state_idx_3] =
+    //   self.state.ans_state_idxs;
+    let mut state_idx = _mm_lddqu_si128(self.state.ans_state_idxs.as_ptr() as *const __m128i);
+    // let i_offset = _mm_setr_epi32(0, 1, 2, 3);
+    let ones = _mm_set1_epi32(1);
+    let infos = self.infos.as_slice();
+    let offset_set_bits_arr = infos
+      .iter()
+      .map(|info| info.offset_bits)
+      .collect::<Vec<_>>();
+    let lower_arr = infos.iter().map(|info| info.lower).collect::<Vec<_>>();
+    // let ans_nodes = self.decoder.nodes.as_slice();
+    let ans_symbols = self.decoder.symbols.as_slice();
+    let next_state_idx_bases = self.decoder.next_state_idx_bases.as_slice();
+    let bits_to_reads = self.decoder.bits_to_reads.as_slice();
+    for base_i in (0..FULL_BATCH_N).step_by(ANS_INTERLEAVING) {
+      stale_byte_idx += bits_past_byte as usize / 8;
+      bits_past_byte %= 8;
+      let packed = bit_reader::u64_at(src, stale_byte_idx);
+      // I hate that I have to do this with a macro, but it gives a serious
+      // performance gain. If I use a [AnsState; 4] for the state_idxs instead
+      // of separate identifiers, it tries to repeatedly load and write to
+      // the array instead of keeping the states in registers.
+      // let i0 = base_i + 0;
+      // let i1 = base_i + 1;
+      // let i2 = base_i + 2;
+      // let i3 = base_i + 3;
+      // let i = _mm_add_epi32(_mm_set1_epi32(base_i as i32), i_offset);
+
+      // let symbol0 = *ans_symbols.get_unchecked(state_idx_0 as usize);
+      // let symbol1 = *ans_symbols.get_unchecked(state_idx_1 as usize);
+      // let symbol2 = *ans_symbols.get_unchecked(state_idx_2 as usize);
+      // let symbol3 = *ans_symbols.get_unchecked(state_idx_3 as usize);
+      let symbol = _mm_i32gather_epi32(
+        ans_symbols.as_ptr() as *const i32,
+        state_idx,
+        4,
+      );
+
+      // let next_state_idx_base0 = *next_state_idx_bases.get_unchecked(state_idx_0 as usize);
+      // let next_state_idx_base1 = *next_state_idx_bases.get_unchecked(state_idx_1 as usize);
+      // let next_state_idx_base2 = *next_state_idx_bases.get_unchecked(state_idx_2 as usize);
+      // let next_state_idx_base3 = *next_state_idx_bases.get_unchecked(state_idx_3 as usize);
+      let next_state_idx_base = _mm_i32gather_epi32(
+        next_state_idx_bases.as_ptr() as *const i32,
+        state_idx,
+        4,
+      );
+
+      // let bits_to_read0 = *bits_to_reads.get_unchecked(state_idx_0 as usize);
+      // let bits_to_read1 = *bits_to_reads.get_unchecked(state_idx_1 as usize);
+      // let bits_to_read2 = *bits_to_reads.get_unchecked(state_idx_2 as usize);
+      // let bits_to_read3 = *bits_to_reads.get_unchecked(state_idx_3 as usize);
+      let bits_to_read = _mm_i32gather_epi32(
+        bits_to_reads.as_ptr() as *const i32,
+        state_idx,
+        4,
+      );
+
+      // let info0 = infos.get_unchecked(symbol0 as usize);
+      // let info1 = infos.get_unchecked(symbol1 as usize);
+      // let info2 = infos.get_unchecked(symbol2 as usize);
+      // let info3 = infos.get_unchecked(symbol3 as usize);
+      // TODO this will only work for 32bit latents, use SoA instead
+      let lower = _mm_i32gather_epi32(lower_arr.as_ptr() as *const i32, symbol, 4);
+      let offset_bits = _mm_i32gather_epi32(
+        offset_set_bits_arr.as_ptr() as *const i32,
+        symbol,
+        4,
+      );
+
+      // let bits_past_byte0 = bits_past_byte;
+      // let bits_past_byte1 = bits_past_byte0 + bits_to_read0;
+      // let bits_past_byte2 = bits_past_byte1 + bits_to_read1;
+      // let bits_past_byte3 = bits_past_byte2 + bits_to_read2;
+      let bits_past_byte_vec = _mm_add_epi32(
+        _mm_slli_si128(bits_to_read, 8),
+        _mm_slli_si128(bits_to_read, 4),
+      ); // (0+0, 0+a, a+b, b+c)
+      let bits_past_byte_vec = _mm_add_epi32(
+        _mm_slli_si128(bits_to_read, 12),
+        bits_past_byte_vec,
+      ); // (0+0, 0+a, a+b, a+b+c)
+      let bits_past_byte_vec = _mm_add_epi32(
+        bits_past_byte_vec,
+        _mm_set1_epi32(bits_past_byte as i32),
+      );
+
+      // let offset_bit_idx0 = offset_bit_idx;
+      // let offset_bit_idx1 = offset_bit_idx0 + info0.offset_bits;
+      // let offset_bit_idx2 = offset_bit_idx1 + info1.offset_bits;
+      // let offset_bit_idx3 = offset_bit_idx2 + info2.offset_bits;
+      let offset_bit_idx_vec = _mm_add_epi32(
+        _mm_slli_si128(offset_bits, 8),
+        _mm_slli_si128(offset_bits, 4),
+      ); // (0+0, 0+a, a+b, b+c)
+      let offset_bit_idx_vec = _mm_add_epi32(
+        _mm_slli_si128(offset_bits, 12),
+        offset_bit_idx_vec,
+      ); // (0+0, 0+a, a+b, a+b+c)
+      let offset_bit_idx_vec = _mm_add_epi32(
+        offset_bit_idx_vec,
+        _mm_set1_epi32(offset_bit_idx as i32),
+      );
+
+      // let ans_val0 = (packed >> bits_past_byte0) as AnsState & ((1 << bits_to_read0) - 1);
+      // let ans_val1 = (packed >> bits_past_byte1) as AnsState & ((1 << bits_to_read1) - 1);
+      // let ans_val2 = (packed >> bits_past_byte2) as AnsState & ((1 << bits_to_read2) - 1);
+      // let ans_val3 = (packed >> bits_past_byte3) as AnsState & ((1 << bits_to_read3) - 1);
+      // let ans_val_left = _mm256_sll_epi64(_mm256_set1_epi64x(packed as i64), bits_past_byte_vec);
+      let ans_val_left = _mm256_srlv_epi64(
+        _mm256_set1_epi64x(packed as i64),
+        _mm256_cvtepi32_epi64(bits_past_byte_vec),
+      );
+      let ans_val_left = _mm_setr_epi32(
+        _mm256_extract_epi64(ans_val_left, 0) as i32,
+        _mm256_extract_epi64(ans_val_left, 1) as i32,
+        _mm256_extract_epi64(ans_val_left, 2) as i32,
+        _mm256_extract_epi64(ans_val_left, 3) as i32,
+      );
+      let ans_val_right = _mm_sub_epi32(_mm_sllv_epi32(ones, bits_to_read), ones);
+      let ans_val = _mm_and_si128(ans_val_left, ans_val_right);
+
+      // *self.state.offset_bits_csum_scratch.get_unchecked_mut(i0) = offset_bit_idx0;
+      // *self.state.offset_bits_csum_scratch.get_unchecked_mut(i1) = offset_bit_idx1;
+      // *self.state.offset_bits_csum_scratch.get_unchecked_mut(i2) = offset_bit_idx2;
+      // *self.state.offset_bits_csum_scratch.get_unchecked_mut(i3) = offset_bit_idx3;
+      _mm_storeu_si128(
+        self.state.offset_bits_csum_scratch.as_mut_ptr().add(base_i) as *mut __m128i,
+        offset_bit_idx_vec,
+      );
+      // *self.state.lowers_scratch.get_unchecked_mut(i0) = info0.lower;
+      // *self.state.lowers_scratch.get_unchecked_mut(i1) = info1.lower;
+      // *self.state.lowers_scratch.get_unchecked_mut(i3) = info3.lower;
+      // *self.state.lowers_scratch.get_unchecked_mut(i2) = info2.lower;
+      _mm_storeu_si128(
+        self.state.lowers_scratch.as_mut_ptr().add(base_i) as *mut __m128i,
+        lower,
+      );
+      // *self.state.offset_bits_scratch.get_unchecked_mut(i0) = info0.offset_bits;
+      // *self.state.offset_bits_scratch.get_unchecked_mut(i1) = info1.offset_bits;
+      // *self.state.offset_bits_scratch.get_unchecked_mut(i2) = info2.offset_bits;
+      // *self.state.offset_bits_scratch.get_unchecked_mut(i3) = info3.offset_bits;
+      _mm_storeu_si128(
+        self.state.offset_bits_scratch.as_mut_ptr().add(base_i) as *mut __m128i,
+        offset_bits,
+      );
+
+      // self.state.set_scratch(i0, offset_bit_idx0, info0);
+      // self.state.set_scratch(i1, offset_bit_idx1, info1);
+      // self.state.set_scratch(i2, offset_bit_idx2, info2);
+      // self.state.set_scratch(i3, offset_bit_idx3, info3);
+
+      // state_idx_0 = next_state_idx_base0 + ans_val0;
+      // state_idx_1 = next_state_idx_base1 + ans_val1;
+      // state_idx_2 = next_state_idx_base2 + ans_val2;
+      // state_idx_3 = next_state_idx_base3 + ans_val3;
+      state_idx = _mm_add_epi32(next_state_idx_base, ans_val);
+
+      // bits_past_byte = bits_past_byte3 + bits_to_read3;
+      // offset_bit_idx = offset_bit_idx3 + info3.offset_bits;
+      bits_past_byte =
+        (_mm_extract_epi32(bits_past_byte_vec, 3) + _mm_extract_epi32(bits_to_read, 3)) as Bitlen;
+      offset_bit_idx =
+        (_mm_extract_epi32(offset_bit_idx_vec, 3) + _mm_extract_epi32(offset_bits, 3)) as Bitlen;
+    }
+
+    reader.stale_byte_idx = stale_byte_idx;
+    reader.bits_past_byte = bits_past_byte;
+    // self.state.ans_state_idxs = [state_idx_0, state_idx_1, state_idx_2, state_idx_3];
+    _mm_storeu_si128(
+      self.state.ans_state_idxs.as_mut_ptr() as *mut __m128i,
+      state_idx,
+    );
   }
 
   // This implementation handles arbitrary batch size and looks simpler, but is

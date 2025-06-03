@@ -10,7 +10,7 @@
 
 #![allow(clippy::uninit_vec)]
 #![deny(clippy::unused_unit)]
-#![deny(dead_code)]
+// #![deny(dead_code)]
 
 #[doc = include_str!("../README.md")]
 #[cfg(doctest)]
