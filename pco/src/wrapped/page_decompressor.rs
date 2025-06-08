@@ -7,10 +7,10 @@ use better_io::BetterBufRead;
 use crate::bit_reader;
 use crate::bit_reader::BitReaderBuilder;
 use crate::constants::{FULL_BATCH_N, PAGE_PADDING};
-use crate::data_types::{Latent, Number};
+use crate::data_types::Number;
 use crate::errors::{PcoError, PcoResult};
-use crate::latent_page_decompressor::LatentPageDecompressor;
-use crate::macros::{define_latent_enum, match_latent_enum};
+use crate::latent_page_decompressor::DynLatentPageDecompressor;
+use crate::macros::match_latent_enum;
 use crate::metadata::page::PageMeta;
 use crate::metadata::per_latent_var::{PerLatentVar, PerLatentVarBuilder};
 use crate::metadata::{ChunkMeta, DeltaEncoding, DynBins, DynLatents, Mode};
@@ -24,11 +24,6 @@ struct LatentScratch {
   dst: DynLatents,
 }
 
-define_latent_enum!(
-  #[derive()]
-  DynLatentPageDecompressor(LatentPageDecompressor)
-);
-
 struct PageDecompressorInner<R: BetterBufRead> {
   // immutable
   n: usize,
@@ -38,7 +33,6 @@ struct PageDecompressorInner<R: BetterBufRead> {
   // mutable
   reader_builder: BitReaderBuilder<R>,
   n_processed: usize,
-  // TODO make these heap allocated
   latent_decompressors: PerLatentVar<DynLatentPageDecompressor>,
   delta_scratch: Option<LatentScratch>,
   secondary_scratch: Option<LatentScratch>,
@@ -102,15 +96,13 @@ fn make_latent_decompressors(
           )));
         }
 
-        let lpd = LatentPageDecompressor::new(
+        DynLatentPageDecompressor::create(
           chunk_latent_var_meta.ans_size_log,
           bins,
           var_delta_encoding,
           page_latent_var_meta.ans_final_state_idxs,
           delta_state,
-        )?;
-
-        DynLatentPageDecompressor::new(lpd).unwrap()
+        )?
       }
     );
 

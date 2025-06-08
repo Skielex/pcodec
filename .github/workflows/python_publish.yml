@@ -10,10 +10,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # enable LTO to reduce binary size (empirically by ~20%)
-  RUSTFLAGS: "-C lto=true -C embed-bitcode=true -Zdylib-lto"
-
 jobs:
   linux:
     runs-on: ubuntu-latest
@@ -27,6 +23,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: 3.x
+      - name: Cargo Config
+        run: mv .cargo/config_for_publishing.toml .cargo/config.toml
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
@@ -34,6 +32,7 @@ jobs:
           args: --release --out dist --interpreter 3.9 3.10 3.11 3.12 3.13 --manifest-path pco_python/Cargo.toml
           sccache: 'true'
           manylinux: auto
+          rust-toolchain: nightly
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -52,12 +51,15 @@ jobs:
         with:
           python-version: 3.x
           architecture: ${{ matrix.target }}
+      - name: Cargo Config
+        run: mv -Force .cargo/config_for_publishing.toml .cargo/config.toml
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
           args: --release --out dist --interpreter 3.9 3.10 3.11 3.12 3.13 --manifest-path pco_python/Cargo.toml
           sccache: 'true'
+          rust-toolchain: nightly
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -75,12 +77,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: 3.x
+      - name: Cargo Config
+        run: mv .cargo/config_for_publishing.toml .cargo/config.toml
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
           args: --release --out dist --interpreter 3.9 3.10 3.11 3.12 3.13 --manifest-path pco_python/Cargo.toml
           sccache: 'true'
+          rust-toolchain: nightly
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -92,6 +97,8 @@ jobs:
     if: contains(github.event.release.name, 'Python')
     steps:
       - uses: actions/checkout@v4
+      - name: Set Rust version
+        run: rustup override set nightly
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
