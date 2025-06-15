@@ -66,7 +66,7 @@ mod tests {
   use crate::constants::*;
 
   fn bits_to_encode(max_value: usize) -> Bitlen {
-    usize::BITS as Bitlen - (max_value.leading_zeros()) as Bitlen
+    (usize::BITS - max_value.leading_zeros()) as Bitlen
   }
 
   fn assert_can_encode(n_bits: Bitlen, max_number: usize) {

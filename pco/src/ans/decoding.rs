@@ -3,7 +3,7 @@ use crate::ans::{AnsState, Symbol};
 use crate::constants::Bitlen;
 
 #[derive(Clone, Debug)]
-#[repr(align(16))]
+#[repr(align(8))]
 pub struct Node {
   pub symbol: Symbol,
   pub next_state_idx_base: AnsState,
