@@ -8,6 +8,7 @@ pub struct Node {
   pub symbol: Symbol,
   pub next_state_idx_base: AnsState,
   pub bits_to_read: Bitlen,
+  pub bits_to_read_shifted: AnsState,
 }
 
 #[derive(Clone, Debug)]
@@ -32,6 +33,7 @@ impl Decoder {
         symbol,
         next_state_idx_base: next_state_base - table_size as AnsState,
         bits_to_read,
+        bits_to_read_shifted: ((1 << bits_to_read) - 1),
       });
       symbol_x_s[symbol as usize] += 1;
     }
