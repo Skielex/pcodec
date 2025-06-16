@@ -9,10 +9,10 @@ mod spec;
 
 // must be u16 or larger
 // should not be exposed in public API
-pub(crate) type AnsState = u32;
+pub(crate) type AnsState = u16;
 // must be u16 or larger
 // should not be exposed in public API
-pub(crate) type Symbol = u32;
+pub(crate) type Symbol = u16;
 
 #[cfg(test)]
 mod tests {
