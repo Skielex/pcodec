@@ -267,9 +267,37 @@ impl<T: Number, R: BetterBufRead> PageDecompressor<T, R> {
 
     let n_to_process = min(num_dst.len(), n_remaining);
 
+    prefetch_page_to_l2(num_dst, n_to_process);
+    // #[cfg(target_arch = "x86_64")]
+    // unsafe {
+
+    //   for i in (0..(n_to_process * std::mem::size_of::<T>())).step_by(64) {
+    //     std::arch::x86_64::_mm_prefetch(
+    //       (num_dst.as_ptr() as *const i8).add(i),
+    //       std::arch::x86_64::_MM_HINT_T1,
+    //     );
+    //   }
+    // }
+
     let mut n_processed = 0;
     while n_processed < n_to_process {
       let dst_batch_end = min(n_processed + FULL_BATCH_N, n_to_process);
+
+      // #[cfg(target_arch = "x86_64")]
+      // unsafe {
+      //   use std::arch::x86_64::{_mm_prefetch, _MM_HINT_ET0};
+
+      //   for i in ((n_processed * std::mem::size_of::<T>())
+      //     ..(dst_batch_end * std::mem::size_of::<T>()))
+      //     .step_by(64)
+      //   {
+      //     _mm_prefetch(
+      //       (num_dst.as_ptr() as *const i8).add(i),
+      //       _MM_HINT_ET0,
+      //     );
+      //   }
+      // }
+
       self.decompress_batch(&mut num_dst[n_processed..dst_batch_end])?;
       n_processed = dst_batch_end;
     }
@@ -283,5 +311,32 @@ impl<T: Number, R: BetterBufRead> PageDecompressor<T, R> {
   /// Returns the rest of the compressed data source.
   pub fn into_src(self) -> R {
     self.inner.reader_builder.into_inner()
+  }
+}
+
+#[inline(never)]
+fn prefetch_page_to_l2<T: Number>(num_dst: &mut [T], n_to_process: usize) {
+  unsafe {
+    // SAFETY: The PREFETCHh instruction is merely a hint and does not affect
+    // program behavior. If executed, this instruction moves data closer to the
+    // processor in anticipation of future use.
+    // https://www.felixcloutier.com/x86/prefetchh
+    // The PREFETCHW instruction is merely a hint and does not affect program
+    // behavior. If executed, this instruction moves data closer to the
+    // processor and invalidates other cached copies in anticipation of the
+    // line being written to in the future.
+    // https://www.felixcloutier.com/x86/prefetchw
+    #[cfg(target_arch = "x86_64")]
+    if is_x86_feature_detected!("sse") {
+      // Prefetch the data to L2 cache to speed up decompression.
+      // We prefetch 64 bytes at a time, which is the size of a cache line on
+      // most x86-64 processors.
+      for i in (0..(n_to_process * std::mem::size_of::<T>())).step_by(64) {
+        std::arch::x86_64::_mm_prefetch(
+          (num_dst.as_ptr() as *const i8).add(i),
+          std::arch::x86_64::_MM_HINT_ET1,
+        );
+      }
+    }
   }
 }

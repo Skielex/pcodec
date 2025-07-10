@@ -1,5 +1,7 @@
 use std::fmt::Debug;
 
+use aligned::{Aligned, A64};
+
 use crate::ans::{AnsState, Spec};
 use crate::bit_reader::BitReader;
 use crate::constants::{Bitlen, DeltaLookback, ANS_INTERLEAVING, FULL_BATCH_N};
@@ -12,9 +14,9 @@ use crate::{ans, bit_reader, delta, read_write_uint};
 #[derive(Clone, Debug)]
 struct State<L: Latent> {
   // scratch needs no backup
-  offset_bits_csum_scratch: [Bitlen; FULL_BATCH_N],
-  offset_bits_scratch: [Bitlen; FULL_BATCH_N],
-  lowers_scratch: [L; FULL_BATCH_N],
+  offset_bits_csum_scratch: Aligned<A64, [Bitlen; FULL_BATCH_N]>,
+  offset_bits_scratch: Aligned<A64, [Bitlen; FULL_BATCH_N]>,
+  lowers_scratch: Aligned<A64, [L; FULL_BATCH_N]>,
 
   ans_state_idxs: [AnsState; ANS_INTERLEAVING],
   delta_state: Vec<L>,
@@ -140,16 +142,19 @@ impl<L: Latent> LatentPageDecompressor<L> {
     let base_bit_idx = reader.bit_idx();
     let src = reader.src;
     let state = &mut self.state;
-    for (dst, (&offset_bits, &offset_bits_csum)) in dst.iter_mut().zip(
-      state
-        .offset_bits_scratch
-        .iter()
-        .zip(state.offset_bits_csum_scratch.iter()),
+    for (dst, (&offset_bits, (&offset_bits_csum, &lower))) in dst.iter_mut().zip(
+      state.offset_bits_scratch.iter().zip(
+        state
+          .offset_bits_csum_scratch
+          .iter()
+          .zip(state.lowers_scratch.iter()),
+      ),
     ) {
       let bit_idx = base_bit_idx + offset_bits_csum as usize;
       let byte_idx = bit_idx / 8;
       let bits_past_byte = bit_idx as Bitlen % 8;
-      *dst = bit_reader::read_uint_at::<L, MAX_U64S>(src, byte_idx, bits_past_byte, offset_bits);
+      *dst = bit_reader::read_uint_at::<L, MAX_U64S>(src, byte_idx, bits_past_byte, offset_bits)
+        .wrapping_add(lower);
     }
     let final_bit_idx = base_bit_idx
       + state.offset_bits_csum_scratch[dst.len() - 1] as usize
@@ -158,21 +163,31 @@ impl<L: Latent> LatentPageDecompressor<L> {
     reader.bits_past_byte = final_bit_idx as Bitlen % 8;
   }
 
-  #[inline(never)]
-  fn add_lowers(&self, dst: &mut [L]) {
-    for (&lower, dst) in self.state.lowers_scratch[0..dst.len()]
-      .iter()
-      .zip(dst.iter_mut())
-    {
-      *dst = dst.wrapping_add(lower);
-    }
-  }
+  // #[inline(never)]
+  // fn add_lowers(&self, dst: &mut [L]) {
+  //   for (&lower, dst) in self.state.lowers_scratch[0..dst.len()]
+  //     .iter()
+  //     .zip(dst.iter_mut())
+  //   {
+  //     *dst = dst.wrapping_add(lower);
+  //   }
+  // }
 
   // If hits a corruption, it returns an error and leaves reader and self unchanged.
   // May contaminate dst.
   pub unsafe fn decompress_batch_pre_delta(&mut self, reader: &mut BitReader, dst: &mut [L]) {
     if dst.is_empty() {
       return;
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    if is_x86_feature_detected!("sse") {
+      for i in (0..(dst.len() * std::mem::size_of::<L>())).step_by(64) {
+        std::arch::x86_64::_mm_prefetch(
+          (dst.as_ptr() as *const i8).add(i),
+          std::arch::x86_64::_MM_HINT_ET0,
+        );
+      }
     }
 
     if self.needs_ans {
@@ -202,7 +217,7 @@ impl<L: Latent> LatentPageDecompressor<L> {
       ),
     }
 
-    self.add_lowers(dst);
+    // self.add_lowers(dst);
   }
 
   pub unsafe fn decompress_batch(
@@ -288,9 +303,9 @@ impl DynLatentPageDecompressor {
     };
 
     let mut state = State {
-      offset_bits_csum_scratch: [0; FULL_BATCH_N],
-      offset_bits_scratch: [0; FULL_BATCH_N],
-      lowers_scratch: [L::ZERO; FULL_BATCH_N],
+      offset_bits_csum_scratch: Aligned([0; FULL_BATCH_N]),
+      offset_bits_scratch: Aligned([0; FULL_BATCH_N]),
+      lowers_scratch: Aligned([L::ZERO; FULL_BATCH_N]),
       ans_state_idxs: ans_final_state_idxs,
       delta_state: working_delta_state,
       delta_state_pos,
