@@ -16,25 +16,49 @@ use crate::{ans, bit_reader, delta, read_write_uint};
 // surrounding code is changed.
 #[derive(Clone, Debug)]
 #[repr(align(64))]
-struct ScratchArray<L: Latent>([L; FULL_BATCH_N]);
+struct ScratchArray<T>([T; FULL_BATCH_N]);
 
-impl<L: Latent> Deref for ScratchArray<L> {
-  type Target = [L; FULL_BATCH_N];
+impl<T> Deref for ScratchArray<T> {
+  type Target = [T; FULL_BATCH_N];
   fn deref(&self) -> &Self::Target {
     &self.0
   }
 }
-impl<L: Latent> DerefMut for ScratchArray<L> {
+
+impl<T> DerefMut for ScratchArray<T> {
   fn deref_mut(&mut self) -> &mut Self::Target {
     &mut self.0
   }
 }
 
+impl Debug for ScratchOffsetValues {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    unsafe {
+      write!(
+        f,
+        "offset_bits: {}, offset_bits_csum: {})",
+        self.offset_values.offset_bits, self.offset_values.offset_bits_csum
+      )
+    }
+  }
+}
+
+#[derive(Copy, Clone, Debug)]
+struct OffsetValues {
+  offset_bits: Bitlen,
+  offset_bits_csum: Bitlen,
+}
+
+#[derive(Copy, Clone)]
+union ScratchOffsetValues {
+  combined_offset_values: u64,
+  offset_values: OffsetValues,
+}
+
 #[derive(Clone, Debug)]
 struct State<L: Latent> {
   // scratch needs no backup
-  offset_bits_csum_scratch: ScratchArray<u32>,
-  offset_bits_scratch: ScratchArray<u32>,
+  offset_bits_scratch: ScratchArray<ScratchOffsetValues>,
   lowers_scratch: ScratchArray<L>,
 
   ans_state_idxs: [AnsState; ANS_INTERLEAVING],
@@ -46,8 +70,9 @@ impl<L: Latent> State<L> {
   #[inline]
   fn set_scratch(&mut self, i: usize, offset_bit_idx: Bitlen, offset_bits: Bitlen, lower: L) {
     unsafe {
-      *self.offset_bits_csum_scratch.get_unchecked_mut(i) = offset_bit_idx;
-      *self.offset_bits_scratch.get_unchecked_mut(i) = offset_bits;
+      let offset_values = self.offset_bits_scratch.get_unchecked_mut(i);
+      offset_values.offset_values.offset_bits = offset_bits;
+      offset_values.offset_values.offset_bits_csum = offset_bit_idx;
       *self.lowers_scratch.get_unchecked_mut(i) = lower;
     };
   }
@@ -161,23 +186,24 @@ impl<L: Latent> LatentPageDecompressor<L> {
     let base_bit_idx = reader.bit_idx();
     let src = reader.src;
     let state = &mut self.state;
-    for (dst, (&offset_bits, (&offset_bits_csum, &lower))) in dst.iter_mut().zip(
-      state.offset_bits_scratch.iter().zip(
-        state
-          .offset_bits_csum_scratch
-          .iter()
-          .zip(state.lowers_scratch.iter()),
-      ),
+
+    for (dst, (&offset_bits, &lower)) in dst.iter_mut().zip(
+      state
+        .offset_bits_scratch
+        .iter()
+        .zip(state.lowers_scratch.iter()),
     ) {
+      let offset_bits_csum = offset_bits.combined_offset_values >> 32;
+      let offset_bits = offset_bits.combined_offset_values as Bitlen;
       let bit_idx = base_bit_idx + offset_bits_csum as usize;
       let byte_idx = bit_idx / 8;
       let bits_past_byte = bit_idx as Bitlen % 8;
       *dst = bit_reader::read_uint_at::<L, MAX_U64S>(src, byte_idx, bits_past_byte, offset_bits)
         .wrapping_add(lower);
     }
-    let final_bit_idx = base_bit_idx
-      + state.offset_bits_csum_scratch[dst.len() - 1] as usize
-      + state.offset_bits_scratch[dst.len() - 1] as usize;
+    let offset_values = state.offset_bits_scratch[dst.len() - 1].offset_values;
+    let final_bit_idx =
+      base_bit_idx + offset_values.offset_bits as usize + offset_values.offset_bits_csum as usize;
     reader.stale_byte_idx = final_bit_idx / 8;
     reader.bits_past_byte = final_bit_idx as Bitlen % 8;
   }
@@ -297,8 +323,11 @@ impl DynLatentPageDecompressor {
     };
 
     let mut state = State {
-      offset_bits_csum_scratch: ScratchArray([0; FULL_BATCH_N]),
-      offset_bits_scratch: ScratchArray([0; FULL_BATCH_N]),
+      offset_bits_scratch: ScratchArray(
+        [ScratchOffsetValues {
+          combined_offset_values: 0,
+        }; FULL_BATCH_N],
+      ),
       lowers_scratch: ScratchArray([L::ZERO; FULL_BATCH_N]),
       ans_state_idxs: ans_final_state_idxs,
       delta_state: working_delta_state,
@@ -311,8 +340,8 @@ impl DynLatentPageDecompressor {
       let bin = &bins[0];
       let mut csum = 0;
       for i in 0..FULL_BATCH_N {
-        state.offset_bits_scratch[i] = bin.offset_bits;
-        state.offset_bits_csum_scratch[i] = csum;
+        state.offset_bits_scratch[i].offset_values.offset_bits = bin.offset_bits;
+        state.offset_bits_scratch[i].offset_values.offset_bits_csum = csum;
         state.lowers_scratch[i] = bin.lower;
         csum += bin.offset_bits;
       }
