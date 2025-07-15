@@ -1,8 +1,6 @@
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 
-use aligned::{Aligned, A64};
-
 use crate::ans::{AnsState, Spec};
 use crate::bit_reader::BitReader;
 use crate::constants::{Bitlen, DeltaLookback, ANS_INTERLEAVING, FULL_BATCH_N};
