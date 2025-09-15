@@ -14,6 +14,32 @@ use crate::{ans, bit_reader, bit_writer, read_write_uint, FULL_BATCH_N};
 use std::io::Write;
 use std::ops::Range;
 
+#[inline(never)]
+#[allow(dead_code)]
+unsafe fn write_26bit_uints<U: ReadWriteUint>(
+  vals: &[U],
+  bitlens: &[Bitlen],
+  mut stale_byte_idx: usize,
+  mut bits_past_byte: Bitlen,
+  dst: &mut [u8],
+) -> (usize, Bitlen) {
+  stale_byte_idx += bits_past_byte as usize / 8;
+  bits_past_byte %= 8;
+  let mut target_u32 = bit_reader::u32_at(dst, stale_byte_idx);
+  for (&val, &bitlen) in vals.iter().zip(bitlens).take(FULL_BATCH_N) {
+    let bytes_added = bits_past_byte as usize / 8;
+    stale_byte_idx += bytes_added;
+    target_u32 >>= bytes_added * 8;
+    bits_past_byte %= 8;
+
+    target_u32 |= val.to_u32() << bits_past_byte;
+    bit_writer::write_u32_to(target_u32, stale_byte_idx, dst);
+
+    bits_past_byte += bitlen;
+  }
+  (stale_byte_idx, bits_past_byte)
+}
+
 // This would be very hard to combine with write_uints because it makes use of
 // an optimization that only works easily for single-u64 writes of 56 bits or
 // less: we keep the `target_u64` value we're updating in a register instead
@@ -85,7 +111,7 @@ pub struct LatentChunkCompressor<L: Latent> {
   pub avg_bits_per_latent: f64,
   is_trivial: bool,
   needs_ans: bool,
-  max_u64s_per_offset: usize,
+  max_bytes_per_offset: usize,
   latents: Vec<L>,
 }
 
@@ -99,7 +125,7 @@ impl<L: Latent> LatentChunkCompressor<L> {
     let encoder = ans::Encoder::new(&ans_spec);
 
     let max_bits_per_offset = bins::max_offset_bits(bins);
-    let max_u64s_per_offset = read_write_uint::calc_max_u64s_for_writing(max_bits_per_offset);
+    let max_bytes_per_offset = read_write_uint::calc_max_bytes_for_writing(max_bits_per_offset);
 
     Ok(LatentChunkCompressor {
       table,
@@ -107,7 +133,7 @@ impl<L: Latent> LatentChunkCompressor<L> {
       avg_bits_per_latent: bins::avg_bits_per_latent(bins, trained.ans_size_log),
       is_trivial: bins::are_trivial(bins),
       needs_ans,
-      max_u64s_per_offset,
+      max_bytes_per_offset,
       latents,
     })
   }
@@ -177,23 +203,30 @@ impl<L: Latent> LatentChunkCompressor<L> {
       match_latent_enum!(
         &dissected_page_var.offsets,
         DynLatents<L>(offsets) => {
-          match self.max_u64s_per_offset {
+          match self.max_bytes_per_offset {
             0 => (writer.stale_byte_idx, writer.bits_past_byte),
-            1 => write_short_uints::<L>(
+            4 => write_short_uints::<L>(
               &offsets[batch_start..],
               &dissected_page_var.offset_bits[batch_start..],
               writer.stale_byte_idx,
               writer.bits_past_byte,
               &mut writer.buf,
             ),
-            2 => write_uints::<L, 2>(
+            8 => write_short_uints::<L>(
               &offsets[batch_start..],
               &dissected_page_var.offset_bits[batch_start..],
               writer.stale_byte_idx,
               writer.bits_past_byte,
               &mut writer.buf,
             ),
-            3 => write_uints::<L, 3>(
+            16 => write_uints::<L, 2>(
+              &offsets[batch_start..],
+              &dissected_page_var.offset_bits[batch_start..],
+              writer.stale_byte_idx,
+              writer.bits_past_byte,
+              &mut writer.buf,
+            ),
+            24 => write_uints::<L, 3>(
               &offsets[batch_start..],
               &dissected_page_var.offset_bits[batch_start..],
               writer.stale_byte_idx,

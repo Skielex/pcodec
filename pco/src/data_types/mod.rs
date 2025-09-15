@@ -120,11 +120,13 @@ pub trait Latent:
   /// Converts a `usize` into this type. Panics if the conversion is
   /// impossible.
   fn from_u64(x: u64) -> Self;
+  fn from_u32(x: u32) -> Self;
 
   fn leading_zeros(self) -> Bitlen;
 
   /// Converts the latent to a usize, truncating higher bits if necessary.
   fn to_u64(self) -> u64;
+  fn to_u32(self) -> u32;
 
   fn wrapping_add(self, other: Self) -> Self;
   fn wrapping_sub(self, other: Self) -> Self;

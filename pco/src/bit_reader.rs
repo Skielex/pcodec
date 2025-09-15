@@ -19,7 +19,13 @@ pub unsafe fn u64_at(src: &[u8], byte_idx: usize) -> u64 {
 }
 
 #[inline]
-pub unsafe fn read_uint_at<U: ReadWriteUint, const MAX_U64S: usize>(
+pub unsafe fn u32_at(src: &[u8], byte_idx: usize) -> u32 {
+  let raw_bytes = *(src.as_ptr().add(byte_idx) as *const [u8; 4]);
+  u32::from_le_bytes(raw_bytes)
+}
+
+#[inline]
+pub unsafe fn read_uint_at<U: ReadWriteUint, const MAX_BYTES: usize>(
   src: &[u8],
   mut byte_idx: usize,
   bits_past_byte: Bitlen,
@@ -47,17 +53,22 @@ pub unsafe fn read_uint_at<U: ReadWriteUint, const MAX_U64S: usize>(
   //    For the 3rd u64 and onward, we skip 8 bytes forward. Due to how we
   //    handled the 2nd u64, the most we'll ever need to shift by is
   //    U::BITS - 8, which is safe.
-  let mut res = U::from_u64(u64_at(src, byte_idx) >> bits_past_byte);
-  let mut processed = min(n, 56 - bits_past_byte);
-  byte_idx += 7;
+  let res = if MAX_BYTES < 8 {
+    U::from_u32(u32_at(src, byte_idx) >> bits_past_byte)
+  } else {
+    let mut res = U::from_u64(u64_at(src, byte_idx) >> bits_past_byte);
+    let mut processed = min(n, 56 - bits_past_byte);
+    byte_idx += 7;
 
-  for _ in 0..MAX_U64S - 1 {
-    res |= U::from_u64(u64_at(src, byte_idx)) << processed;
-    processed += 64;
-    byte_idx += 8;
-  }
+    for _ in (0..MAX_BYTES - 8).step_by(8) {
+      res |= U::from_u64(u64_at(src, byte_idx)) << processed;
+      processed += 64;
+      byte_idx += 8;
+    }
+    res
+  };
 
-  if MAX_U64S * 64 <= U::BITS as usize {
+  if MAX_BYTES * 8 <= U::BITS as usize {
     bits::lowest_bits_fast(res, n)
   } else {
     bits::lowest_bits(res, n)
@@ -125,20 +136,32 @@ impl<'a> BitReader<'a> {
 
   pub unsafe fn read_uint<U: ReadWriteUint>(&mut self, n: Bitlen) -> U {
     self.refill();
-    let res = match U::MAX_U64S {
-      1 => read_uint_at::<U, 1>(
-        self.src,
-        self.stale_byte_idx,
-        self.bits_past_byte,
-        n,
-      ),
+    let res = match U::MAX_BYTES {
       2 => read_uint_at::<U, 2>(
         self.src,
         self.stale_byte_idx,
         self.bits_past_byte,
         n,
       ),
-      3 => read_uint_at::<U, 3>(
+      4 => read_uint_at::<U, 4>(
+        self.src,
+        self.stale_byte_idx,
+        self.bits_past_byte,
+        n,
+      ),
+      8 => read_uint_at::<U, 8>(
+        self.src,
+        self.stale_byte_idx,
+        self.bits_past_byte,
+        n,
+      ),
+      16 => read_uint_at::<U, 16>(
+        self.src,
+        self.stale_byte_idx,
+        self.bits_past_byte,
+        n,
+      ),
+      24 => read_uint_at::<U, 24>(
         self.src,
         self.stale_byte_idx,
         self.bits_past_byte,
@@ -147,7 +170,7 @@ impl<'a> BitReader<'a> {
       0 => panic!("[BitReader] data type cannot have 0 bits"),
       _ => panic!(
         "[BitReader] data type too large (extra u64's {} > 2)",
-        U::MAX_U64S
+        U::MAX_BYTES
       ),
     };
     self.consume(n);

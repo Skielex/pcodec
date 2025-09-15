@@ -19,6 +19,13 @@ pub unsafe fn write_u64_to(x: u64, byte_idx: usize, dst: &mut [u8]) {
 }
 
 #[inline]
+#[allow(dead_code)]
+pub unsafe fn write_u32_to(x: u32, byte_idx: usize, dst: &mut [u8]) {
+  let target = dst.as_mut_ptr().add(byte_idx) as *mut [u8; 4];
+  *target = x.to_le_bytes();
+}
+
+#[inline]
 pub unsafe fn write_uint_to<U: ReadWriteUint, const MAX_U64S: usize>(
   val: U,
   mut byte_idx: usize,
@@ -93,20 +100,20 @@ impl<W: Write> BitWriter<W> {
 
   pub unsafe fn write_uint<U: ReadWriteUint>(&mut self, x: U, n: Bitlen) {
     self.refill();
-    match U::MAX_U64S {
-      1 => write_uint_to::<U, 1>(
+    match U::MAX_BYTES {
+      4 | 8 => write_uint_to::<U, 1>(
         x,
         self.stale_byte_idx,
         self.bits_past_byte,
         &mut self.buf,
       ),
-      2 => write_uint_to::<U, 2>(
+      16 => write_uint_to::<U, 2>(
         x,
         self.stale_byte_idx,
         self.bits_past_byte,
         &mut self.buf,
       ),
-      3 => write_uint_to::<U, 3>(
+      24 => write_uint_to::<U, 3>(
         x,
         self.stale_byte_idx,
         self.bits_past_byte,
@@ -114,8 +121,8 @@ impl<W: Write> BitWriter<W> {
       ),
       0 => panic!("[BitReader] data type cannot have 0 bits"),
       _ => panic!(
-        "[BitWriter] data type too large (extra u64's {} > 2)",
-        U::MAX_U64S
+        "[BitWriter] data type too large (bytes {} > 24)",
+        U::MAX_BYTES
       ),
     }
     self.consume(n);
