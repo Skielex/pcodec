@@ -9,7 +9,7 @@ use crate::dyn_latent_slice::DynLatentSlice;
 use crate::errors::{PcoError, PcoResult};
 use crate::macros::define_latent_enum;
 use crate::metadata::{bins, Bin, DeltaEncoding};
-use crate::{ans, bit_reader, delta, read_write_uint};
+use crate::{ans, bit_reader, bits, delta, read_write_uint};
 
 // Struct to enforce alignment of the scratch arrays to 64 bytes. This can
 // improve performance for SIMD operations. The primary goal here is to avoid
@@ -83,44 +83,144 @@ impl<L: Latent> PageLatentDecompressor<L> {
     // ANS_INTERLEAVING == 4.
     let src = reader.src;
     let mut stale_byte_idx = reader.stale_byte_idx;
-    let mut bits_past_byte = reader.bits_past_byte;
-    let mut offset_bit_idx = 0;
+    // let mut bits_past_byte = reader.bits_past_byte;
+    // let mut offset_bit_idx = 0;
+    let mut offset_bit_idx_bits_past_byte = reader.bits_past_byte;
     let [mut state_idx_0, mut state_idx_1, mut state_idx_2, mut state_idx_3] =
       self.state.ans_state_idxs;
     let ans_nodes = self.decoder.nodes.as_slice();
     let lowers = self.state_lowers.as_slice();
+
     for base_i in (0..FULL_BATCH_N).step_by(ANS_INTERLEAVING) {
-      stale_byte_idx += bits_past_byte as usize / 8;
-      bits_past_byte %= 8;
+      stale_byte_idx += (offset_bit_idx_bits_past_byte & 0xFF) as usize / 8;
+      offset_bit_idx_bits_past_byte &= 0xFFFF_FF07;
       let packed = bit_reader::u64_at(src, stale_byte_idx);
       // I hate that I have to do this with a macro, but it gives a serious
       // performance gain. If I use a [AnsState; 4] for the state_idxs instead
       // of separate identifiers, it tries to repeatedly load and write to
       // the array instead of keeping the states in registers.
-      macro_rules! handle_single_symbol {
-        ($j: expr, $state_idx: ident) => {
-          let i = base_i + $j;
-          let node = unsafe { ans_nodes.get_unchecked($state_idx as usize) };
-          let bits_to_read = node.bits_to_read as Bitlen;
-          let ans_val = (packed >> bits_past_byte) as AnsState & ((1 << bits_to_read) - 1);
-          let lower = unsafe { *lowers.get_unchecked($state_idx as usize) };
-          let offset_bits = node.offset_bits as Bitlen;
-          self
-            .state
-            .set_scratch(i, offset_bit_idx, offset_bits, lower);
-          bits_past_byte += bits_to_read;
-          offset_bit_idx += offset_bits;
-          $state_idx = node.next_state_idx_base as AnsState + ans_val;
-        };
-      }
-      handle_single_symbol!(0, state_idx_0);
-      handle_single_symbol!(1, state_idx_1);
-      handle_single_symbol!(2, state_idx_2);
-      handle_single_symbol!(3, state_idx_3);
+
+      let node_0 = unsafe { ans_nodes.get_unchecked(state_idx_0 as usize).raw };
+      let node_1 = unsafe { ans_nodes.get_unchecked(state_idx_1 as usize).raw };
+      let node_2 = unsafe { ans_nodes.get_unchecked(state_idx_2 as usize).raw };
+      let node_3 = unsafe { ans_nodes.get_unchecked(state_idx_3 as usize).raw };
+
+      let lower_0 = unsafe { *lowers.get_unchecked(state_idx_0 as usize) };
+      let lower_1 = unsafe { *lowers.get_unchecked(state_idx_1 as usize) };
+      let lower_2 = unsafe { *lowers.get_unchecked(state_idx_2 as usize) };
+      let lower_3 = unsafe { *lowers.get_unchecked(state_idx_3 as usize) };
+
+      let node_0_x = node_0 & 0xFFFF;
+      let node_1_x = node_1 & 0xFFFF;
+      let node_2_x = node_2 & 0xFFFF;
+      let node_3_x = node_3 & 0xFFFF;
+      // let node = wide::u32x4::new([node_0, node_1, node_2, node_3]);
+
+      let bits_to_read_0 = (node_0 & 0xFF) as Bitlen;
+      let bits_to_read_1 = (node_1 & 0xFF) as Bitlen;
+      let bits_to_read_2 = (node_2 & 0xFF) as Bitlen;
+      let bits_to_read_3 = (node_3 & 0xFF) as Bitlen;
+      // let bits_to_read = node >> 24;
+
+      let offset_bits_0 = (node_0_x >> 8) as Bitlen;
+      let offset_bits_1 = (node_1_x >> 8) as Bitlen;
+      let offset_bits_2 = (node_2_x >> 8) as Bitlen;
+      let offset_bits_3 = (node_3_x >> 8) as Bitlen;
+      // let offset_bits = node >> 16 & u32x4::splat(0xFF);
+
+      let offset_bit_idx_bits_past_byte_0 = offset_bit_idx_bits_past_byte;
+      let offset_bit_idx_bits_past_byte_1 = offset_bit_idx_bits_past_byte + node_0_x;
+      let offset_bit_idx_bits_past_byte_2 = offset_bit_idx_bits_past_byte + node_0_x + node_1_x;
+      let offset_bit_idx_bits_past_byte_3 =
+        offset_bit_idx_bits_past_byte + node_0_x + node_1_x + node_2_x;
+      // let node_csum = u32x4::new([node_csum_0, node_csum_1, node_csum_2, node_csum_3]);
+      // let node_csum = i8x4::new([node_csum_0, node_csum_1, node_csum_2, node_csum_3]);
+
+      // let bits_to_read_csum_0 = bits_past_byte;
+      // let bits_to_read_csum_1 = bits_past_byte + bits_to_read_0;
+      // let bits_to_read_csum_2 = bits_past_byte + bits_to_read_0 + bits_to_read_1;
+      // let bits_to_read_csum_3 = bits_past_byte + bits_to_read_0 + bits_to_read_1 + bits_to_read_2;
+      let bits_past_byte_0 = offset_bit_idx_bits_past_byte_0 & 0xFF;
+      let bits_past_byte_1 = offset_bit_idx_bits_past_byte_1 & 0xFF;
+      let bits_past_byte_2 = offset_bit_idx_bits_past_byte_2 & 0xFF;
+      let bits_past_byte_3 = offset_bit_idx_bits_past_byte_3 & 0xFF;
+
+      // let offset_bit_idx_csum_0 = offset_bit_idx;
+      // let offset_bit_idx_csum_1 = offset_bit_idx + offset_bits_0;
+      // let offset_bit_idx_csum_2 = offset_bit_idx + offset_bits_0 + offset_bits_1;
+      // let offset_bit_idx_csum_3 = offset_bit_idx + offset_bits_0 + offset_bits_1 + offset_bits_2;
+      let offset_bit_idx_0 = offset_bit_idx_bits_past_byte_0 >> 8;
+      let offset_bit_idx_1 = offset_bit_idx_bits_past_byte_1 >> 8;
+      let offset_bit_idx_2 = offset_bit_idx_bits_past_byte_2 >> 8;
+      let offset_bit_idx_3 = offset_bit_idx_bits_past_byte_3 >> 8;
+
+      let ans_val_0 = (packed >> bits_past_byte_0) as AnsState & ((1 << bits_to_read_0) - 1);
+      let ans_val_1 = (packed >> bits_past_byte_1) as AnsState & ((1 << bits_to_read_1) - 1);
+      let ans_val_2 = (packed >> bits_past_byte_2) as AnsState & ((1 << bits_to_read_2) - 1);
+      let ans_val_3 = (packed >> bits_past_byte_3) as AnsState & ((1 << bits_to_read_3) - 1);
+      // let ans_val =
+      //   (packed >> node_csum.widen()) & (u32x4::splat(1) << bits_to_read - u32x4::splat(1));
+
+      *self.state.offset_bits_scratch.get_unchecked_mut(base_i) = offset_bits_0;
+      *self.state.offset_bits_scratch.get_unchecked_mut(base_i + 1) = offset_bits_1;
+      *self.state.offset_bits_scratch.get_unchecked_mut(base_i + 2) = offset_bits_2;
+      *self.state.offset_bits_scratch.get_unchecked_mut(base_i + 3) = offset_bits_3;
+
+      *self
+        .state
+        .offset_bits_csum_scratch
+        .get_unchecked_mut(base_i) = offset_bit_idx_0;
+      *self
+        .state
+        .offset_bits_csum_scratch
+        .get_unchecked_mut(base_i + 1) = offset_bit_idx_1;
+      *self
+        .state
+        .offset_bits_csum_scratch
+        .get_unchecked_mut(base_i + 2) = offset_bit_idx_2;
+      *self
+        .state
+        .offset_bits_csum_scratch
+        .get_unchecked_mut(base_i + 3) = offset_bit_idx_3;
+
+      *self.state.latents.get_unchecked_mut(base_i) = lower_0;
+      *self.state.latents.get_unchecked_mut(base_i + 1) = lower_1;
+      *self.state.latents.get_unchecked_mut(base_i + 2) = lower_2;
+      *self.state.latents.get_unchecked_mut(base_i + 3) = lower_3;
+
+      state_idx_0 = (node_0 >> 16) as AnsState + ans_val_0;
+      state_idx_1 = (node_1 >> 16) as AnsState + ans_val_1;
+      state_idx_2 = (node_2 >> 16) as AnsState + ans_val_2;
+      state_idx_3 = (node_3 >> 16) as AnsState + ans_val_3;
+
+      offset_bit_idx_bits_past_byte = offset_bit_idx_bits_past_byte_3 + node_3_x;
+      // bits_past_byte = bits_to_read_csum_3 + bits_to_read_3;
+      // offset_bit_idx = offset_bit_idx_csum_3 + offset_bits_3;
+
+      // macro_rules! handle_single_symbol {
+      //   ($j: expr, $state_idx: ident) => {
+      //     let i = base_i + $j;
+      //     let node = unsafe { ans_nodes.get_unchecked($state_idx as usize).raw };
+      //     let bits_to_read = (node >> 24) as Bitlen;
+      //     let ans_val = (packed >> bits_past_byte) as AnsState & ((1 << bits_to_read) - 1);
+      //     let lower = unsafe { *lowers.get_unchecked($state_idx as usize) };
+      //     let offset_bits = ((node >> 16) & 0xFF) as Bitlen;
+      //     self
+      //       .state
+      //       .set_scratch(i, offset_bit_idx, offset_bits, lower);
+      //     bits_past_byte += bits_to_read;
+      //     offset_bit_idx += offset_bits;
+      //     $state_idx = (node & 0xFFFF) as AnsState + ans_val;
+      //   };
+      // }
+      // handle_single_symbol!(0, state_idx_0);
+      // handle_single_symbol!(1, state_idx_1);
+      // handle_single_symbol!(2, state_idx_2);
+      // handle_single_symbol!(3, state_idx_3);
     }
 
     reader.stale_byte_idx = stale_byte_idx;
-    reader.bits_past_byte = bits_past_byte;
+    reader.bits_past_byte = offset_bit_idx_bits_past_byte & 0xFF;
     self.state.ans_state_idxs = [state_idx_0, state_idx_1, state_idx_2, state_idx_3];
   }
 
@@ -140,16 +240,16 @@ impl<L: Latent> PageLatentDecompressor<L> {
       bits_past_byte %= 8;
       let packed = bit_reader::u64_at(src, stale_byte_idx);
       let node = unsafe { self.decoder.nodes.get_unchecked(state_idx) };
-      let bits_to_read = node.bits_to_read as Bitlen;
+      let bits_to_read = unsafe { node.fields.bits_to_read } as Bitlen;
       let ans_val = (packed >> bits_past_byte) as AnsState & ((1 << bits_to_read) - 1);
       let lower = unsafe { *self.state_lowers.get_unchecked(state_idx) };
-      let offset_bits = node.offset_bits as Bitlen;
+      let offset_bits = unsafe { node.fields.offset_bits } as Bitlen;
       self
         .state
         .set_scratch(i, offset_bit_idx, offset_bits, lower);
       bits_past_byte += bits_to_read;
       offset_bit_idx += offset_bits;
-      state_idxs[j] = node.next_state_idx_base as AnsState + ans_val;
+      state_idxs[j] = unsafe { node.fields.next_state_idx_base } as AnsState + ans_val;
     }
 
     reader.stale_byte_idx = stale_byte_idx;

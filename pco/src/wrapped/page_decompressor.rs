@@ -115,22 +115,23 @@ fn decompress_primary_or_secondary<'a, R: BetterBufRead>(
   n_remaining: usize,
   batch_n: usize,
 ) -> PcoResult<DynLatentSlice<'a>> {
-  reader_builder.with_reader(|reader| unsafe {
-    match_latent_enum!(
-      dyn_pld,
-      DynPageLatentDecompressor<L>(pld) => {
-        // We never apply delta encoding to delta latents, so we just
-        // skip straight to the inner PageLatentDecompressor
-        pld.decompress_batch(
-          delta_latents,
-          reader,
-          n_remaining,
-          batch_n,
-        )
-      }
-    )
-  })?;
-  Ok(dyn_pld.latents())
+  reader_builder
+    .with_reader(|reader| unsafe {
+      match_latent_enum!(
+        dyn_pld,
+        DynPageLatentDecompressor<L>(pld) => {
+          // We never apply delta encoding to delta latents, so we just
+          // skip straight to the inner PageLatentDecompressor
+          pld.decompress_batch(
+            delta_latents,
+            reader,
+            n_remaining,
+            batch_n,
+          )
+        }
+      )
+    })
+    .map(|_| dyn_pld.latents())
 }
 
 impl<T: Number, R: BetterBufRead> PageDecompressor<T, R> {

@@ -11,11 +11,25 @@ use crate::constants::Bitlen;
 //
 // Also note that we include the bin's offset_bits in the struct, even though it
 // isn't a part of ANS coding; it just fits. This is another performance hack.
-#[derive(Clone, Debug)]
-pub struct Node {
-  pub next_state_idx_base: u16,
-  pub offset_bits: u8,
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub union Node {
+  pub fields: NodeFields,
+  pub raw: u32,
+}
+
+impl std::fmt::Debug for Node {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    todo!()
+  }
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct NodeFields {
   pub bits_to_read: u8,
+  pub offset_bits: u8,
+  pub next_state_idx_base: u16,
 }
 
 #[derive(Clone, Debug)]
@@ -37,9 +51,11 @@ impl Decoder {
       // least one node, so we handle that by using 0 offset bits.
       let offset_bits = bin_offset_bits.get(symbol as usize).cloned().unwrap_or(0);
       nodes.push(Node {
-        next_state_idx_base: (next_state_base - table_size as AnsState) as u16,
-        offset_bits: offset_bits as u8,
-        bits_to_read: bits_to_read as u8,
+        fields: NodeFields {
+          next_state_idx_base: (next_state_base - table_size as AnsState) as u16,
+          offset_bits: offset_bits as u8,
+          bits_to_read: bits_to_read as u8,
+        },
       });
       symbol_x_s[symbol as usize] += 1;
     }
