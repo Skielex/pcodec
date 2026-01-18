@@ -9,6 +9,7 @@ use crate::dyn_latent_slice::DynLatentSlice;
 use crate::errors::PcoResult;
 use crate::macros::define_latent_enum;
 use crate::metadata::delta_encoding::LatentVarDeltaEncoding;
+use crate::read_write_uint::calc_max_bytes;
 use crate::{bit_reader, delta};
 
 #[inline(never)]
@@ -65,6 +66,7 @@ pub struct PageLatentDecompressor<L: Latent> {
   ans_state_idxs: [AnsState; ANS_INTERLEAVING],
   delta_state: Vec<L>,
   delta_state_pos: usize,
+  bytes_per_offset_matched_ub: i64,
 }
 
 impl<L: Latent> PageLatentDecompressor<L> {
@@ -80,6 +82,7 @@ impl<L: Latent> PageLatentDecompressor<L> {
       ans_state_idxs: ans_final_state_idxs,
       delta_state: working_delta_state,
       delta_state_pos,
+      bytes_per_offset_matched_ub: 0,
     }
   }
 
@@ -198,6 +201,43 @@ impl<L: Latent> PageLatentDecompressor<L> {
       cld.scratch.latents[..batch_n].fill(cld.state_lowers[0]);
     }
 
+    // Conditionally recompute `bytes_per_offset` based on actual offset bits
+    // in this batch. This is very fast and allows us to optimize the read size.
+    // However, if it stabilizes to the upper bound, we'll stop recomputing it to
+    // avoid unnecessary work.
+    // Cases:
+    // - `self.bytes_per_offset == 0`: all offsets are zero, so no need to
+    //   recompute.
+    // - `self.bytes_per_offset_matched_ub >= threshold`: we've seen several
+    //   batches in a row where the computed `bytes_per_offset` matches the
+    //   previous upper bound. This suggests that the upper bound is accurate, so we
+    //   can just use it directly.
+    // - `dst.len() < FULL_BATCH_N`: improves performance for case where there's
+    //   just one batch since we've already calculated the upper bound.
+    const MATCHED_UPPER_BOUND_THRESHOLD_COUNT: i64 = 8;
+    let bytes_per_offset = if cld.bytes_per_offset == 0
+      || self.bytes_per_offset_matched_ub >= MATCHED_UPPER_BOUND_THRESHOLD_COUNT
+      || batch_n < FULL_BATCH_N
+    {
+      cld.bytes_per_offset
+    } else {
+      let bytes_per_offset = cld
+        .scratch
+        .offset_bits
+        .0
+        .iter()
+        .cloned()
+        .max()
+        .map(calc_max_bytes)
+        .unwrap_or(cld.bytes_per_offset);
+      if bytes_per_offset == cld.bytes_per_offset {
+        self.bytes_per_offset_matched_ub += 1;
+      } else {
+        self.bytes_per_offset_matched_ub -= 1;
+      }
+      bytes_per_offset
+    };
+
     // We want to read the offsets for each latent type as fast as possible.
     // Depending on the number of bits per offset, we can read them in
     // different chunk sizes. We use the smallest chunk size that can hold
@@ -217,7 +257,7 @@ impl<L: Latent> PageLatentDecompressor<L> {
         )
       };
     }
-    match (cld.bytes_per_offset, L::BITS) {
+    match (bytes_per_offset, L::BITS) {
       (0, _) => (),
       (1..=4, 8) => specialized_read_offsets!(4),
       (1..=4, 16) => specialized_read_offsets!(4),
@@ -227,7 +267,7 @@ impl<L: Latent> PageLatentDecompressor<L> {
       (9..=15, 64) => specialized_read_offsets!(15),
       _ => panic!(
         "[PageLatentDecompressor] {} byte read not supported for {}-bit Latents",
-        cld.bytes_per_offset,
+        bytes_per_offset,
         L::BITS
       ),
     }
