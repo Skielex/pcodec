@@ -13,11 +13,11 @@ fn test_stack_sizes() {
   assert_eq!(size_of::<ChunkCompressor>(), 264);
 
   // decompression
-  assert_eq!(size_of::<PageLatentDecompressor<u64>>(), 56);
-  assert_eq!(size_of::<DynPageLatentDecompressor>(), 64);
+  assert_eq!(size_of::<PageLatentDecompressor<u64>>(), 48);
+  assert_eq!(size_of::<DynPageLatentDecompressor>(), 56);
   assert_eq!(
     size_of::<PageDecompressor<u64, &[u8]>>(),
-    264
+    240
   );
   assert_eq!(
     size_of::<ChunkLatentDecompressor<u64>>(),
