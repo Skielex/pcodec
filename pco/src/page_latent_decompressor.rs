@@ -224,7 +224,6 @@ impl<L: Latent> PageLatentDecompressor<L> {
       let bytes_per_offset = cld
         .scratch
         .offset_bits
-        .0
         .iter()
         .cloned()
         .max()
