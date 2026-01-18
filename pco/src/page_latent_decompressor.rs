@@ -206,13 +206,13 @@ impl<L: Latent> PageLatentDecompressor<L> {
     // However, if it stabilizes to the upper bound, we'll stop recomputing it to
     // avoid unnecessary work.
     // Cases:
-    // - `self.bytes_per_offset == 0`: all offsets are zero, so no need to
+    // - `cld.bytes_per_offset == 0`: all offsets are zero, so no need to
     //   recompute.
     // - `self.bytes_per_offset_matched_ub >= threshold`: we've seen several
     //   batches in a row where the computed `bytes_per_offset` matches the
     //   previous upper bound. This suggests that the upper bound is accurate, so we
     //   can just use it directly.
-    // - `dst.len() < FULL_BATCH_N`: improves performance for case where there's
+    // - `batch_n < FULL_BATCH_N`: improves performance for case where there's
     //   just one batch since we've already calculated the upper bound.
     const MATCHED_UPPER_BOUND_THRESHOLD_COUNT: i64 = 8;
     let bytes_per_offset = if cld.bytes_per_offset == 0
