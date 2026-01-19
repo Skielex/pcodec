@@ -262,7 +262,8 @@ impl<L: Latent> PageLatentDecompressor<L> {
       (1..=4, 16) => specialized_read_offsets!(4),
       (1..=4, 32) => specialized_read_offsets!(4),
       (5..=8, 32) => specialized_read_offsets!(8),
-      (1..=8, 64) => specialized_read_offsets!(8),
+      (1..=4, 64) => specialized_read_offsets!(4),
+      (5..=8, 64) => specialized_read_offsets!(8),
       (9..=15, 64) => specialized_read_offsets!(15),
       _ => panic!(
         "[PageLatentDecompressor] {} byte read not supported for {}-bit Latents",
