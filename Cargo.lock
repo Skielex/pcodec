@@ -916,7 +916,7 @@ version = "0.0.0"
 dependencies = [
  "half",
  "libc",
- "pco 1.0.0-rc",
+ "pco 1.0.1",
 ]
 
 [[package]]
@@ -1022,7 +1022,7 @@ checksum = "d3a5ccdfd6c5e7e2fea9c5cf256f2a08216047fab19c621c3da64e9ae4a1462d"
 
 [[package]]
 name = "dtype_dispatch"
-version = "0.2.0"
+version = "0.2.1"
 
 [[package]]
 name = "dyn-hash"
@@ -2269,10 +2269,10 @@ dependencies = [
 
 [[package]]
 name = "pco"
-version = "1.0.0-rc"
+version = "1.0.1"
 dependencies = [
  "better_io 0.2.0",
- "dtype_dispatch 0.2.0",
+ "dtype_dispatch 0.2.1",
  "half",
  "rand 0.8.5",
  "rand_xoshiro",
@@ -2294,7 +2294,7 @@ dependencies = [
  "indicatif",
  "once_cell",
  "parquet",
- "pco 1.0.0-rc",
+ "pco 1.0.1",
  "q_compress",
  "rayon",
  "rust-openzl",
@@ -2315,16 +2315,16 @@ version = "0.1.0"
 dependencies = [
  "half",
  "jni",
- "pco 1.0.0-rc",
+ "pco 1.0.1",
 ]
 
 [[package]]
 name = "pco_python"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "half",
  "numpy",
- "pco 1.0.0-rc",
+ "pco 1.0.1",
  "pyo3",
 ]
 
@@ -2532,6 +2532,7 @@ version = "0.27.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b455933107de8642b4487ed26d912c2d899dec6114884214a0b3bb3be9261ea6"
 dependencies = [
+ "python3-dll-a",
  "target-lexicon",
 ]
 
@@ -2568,6 +2569,15 @@ dependencies = [
  "pyo3-build-config",
  "quote",
  "syn 2.0.113",
+]
+
+[[package]]
+name = "python3-dll-a"
+version = "0.2.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d381ef313ae70b4da5f95f8a4de773c6aa5cd28f73adec4b4a31df70b66780d8"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

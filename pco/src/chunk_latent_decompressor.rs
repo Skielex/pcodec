@@ -1,16 +1,13 @@
-use crate::dyn_latent_slice::DynLatentSlice;
+use crate::ans::{self, Spec};
+use crate::constants::Bitlen;
+use crate::data_types::Latent;
+use crate::dyn_slices::DynLatentSlice;
+use crate::errors::PcoResult;
 use crate::macros::{define_latent_enum, match_latent_enum};
-use crate::metadata::{ChunkLatentVarMeta, DynBins};
+use crate::metadata::delta_encoding::LatentVarDeltaEncoding;
+use crate::metadata::{bins, Bin, ChunkLatentVarMeta, DynBins};
 use crate::scratch_array::ScratchArray;
-use crate::FULL_BATCH_N;
-use crate::{
-  ans::{self, Spec},
-  constants::Bitlen,
-  data_types::Latent,
-  errors::PcoResult,
-  metadata::{bins, delta_encoding::LatentVarDeltaEncoding, Bin},
-  read_write_uint,
-};
+use crate::{read_write_uint, FULL_BATCH_N};
 
 #[derive(Clone, Debug)]
 pub struct ChunkLatentDecompressorScratch<L: Latent> {
@@ -48,16 +45,16 @@ impl<L: Latent> ChunkLatentDecompressor<L> {
 
     let only_bin = if bins.len() == 1 { Some(bins[0]) } else { None };
 
-    let mut offset_bits_csum_scratch = ScratchArray([0; FULL_BATCH_N]);
-    let mut offset_bits_scratch = ScratchArray([0; FULL_BATCH_N]);
+    let mut offset_bits_csum = ScratchArray([0; FULL_BATCH_N]);
+    let mut offset_bits = ScratchArray([0; FULL_BATCH_N]);
     let mut latents = ScratchArray([L::ZERO; FULL_BATCH_N]);
 
     if let Some(bin) = &only_bin {
       // we optimize performance by setting state once and never again
       let mut csum = 0;
       for i in 0..FULL_BATCH_N {
-        offset_bits_scratch[i] = bin.offset_bits;
-        offset_bits_csum_scratch[i] = csum;
+        offset_bits[i] = bin.offset_bits;
+        offset_bits_csum[i] = csum;
         latents[i] = bin.lower;
         csum += bin.offset_bits;
       }
@@ -70,8 +67,8 @@ impl<L: Latent> ChunkLatentDecompressor<L> {
       decoder,
       delta_encoding,
       scratch: ChunkLatentDecompressorScratch {
-        offset_bits_csum: offset_bits_csum_scratch,
-        offset_bits: offset_bits_scratch,
+        offset_bits_csum,
+        offset_bits,
         latents,
       },
     }))
@@ -106,11 +103,11 @@ impl DynChunkLatentDecompressor {
   }
 
   pub fn latents<'a>(&'a mut self) -> DynLatentSlice<'a> {
-    match self {
-      Self::U8(inner) => DynLatentSlice::U8(&mut *inner.scratch.latents),
-      Self::U16(inner) => DynLatentSlice::U16(&mut *inner.scratch.latents),
-      Self::U32(inner) => DynLatentSlice::U32(&mut *inner.scratch.latents),
-      Self::U64(inner) => DynLatentSlice::U64(&mut *inner.scratch.latents),
-    }
+    match_latent_enum!(
+      self,
+      DynChunkLatentDecompressor<L>(inner) => {
+        DynLatentSlice::new(&*inner.scratch.latents)
+      }
+    )
   }
 }
