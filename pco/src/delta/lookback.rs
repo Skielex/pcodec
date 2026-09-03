@@ -11,6 +11,8 @@ use crate::FULL_BATCH_N;
 // * repeating: try the most recent lookbacks we actually used
 // * hash: look up similar values by hash
 const PROPOSED_LOOKBACKS: usize = 16;
+// `find_best_lookback` packs a proposal's index into the low 4 bits of its score.
+const _: () = assert!(PROPOSED_LOOKBACKS <= 16);
 const BRUTE_LOOKBACKS: usize = 6;
 const REPEATING_LOOKBACKS: usize = 4;
 // To help locate similar latents for lookback encoding, we hash each latent at
@@ -24,7 +26,7 @@ fn hash_lookup(
   i: usize,
   hash_table_n: usize,
   window_n: usize,
-  idx_hash_table: &mut [usize],
+  idx_hash_table: &mut [u32],
   proposed_lookbacks: &mut [usize; PROPOSED_LOOKBACKS],
 ) {
   let hash_mask = hash_table_n - 1;
@@ -46,7 +48,8 @@ fn hash_lookup(
       // SAFETY: `h = hash_fn(...) & hash_mask < hash_table_n`, and
       // `offset` is a multiple of `hash_table_n` with at most
       // `COARSENESSES.len() - 1` increments, so `offset + h < idx_hash_table.len()`.
-      let lookback_to_last_instance = unsafe { i - *idx_hash_table.get_unchecked(offset + h) };
+      let lookback_to_last_instance =
+        unsafe { i - *idx_hash_table.get_unchecked(offset + h) as usize };
       proposed_lookbacks[proposal_idx] = if lookback_to_last_instance <= window_n {
         lookback_to_last_instance
       } else {
@@ -57,7 +60,7 @@ fn hash_lookup(
     let h = hashes[1];
     // SAFETY: same bounds argument as the read above.
     unsafe {
-      *idx_hash_table.get_unchecked_mut(offset + h) = i;
+      *idx_hash_table.get_unchecked_mut(offset + h) = i as u32;
     }
     offset += hash_table_n;
   }
@@ -69,32 +72,33 @@ fn find_best_lookback<L: Latent>(
   i: usize,
   latents: &[L],
   proposed_lookbacks: &[usize; PROPOSED_LOOKBACKS],
-  lookback_counts: &mut [u32],
+  lookback_goodnesses: &[u8],
 ) -> usize {
-  let mut best_goodness = 0;
-  let mut best_lookback: usize = 0;
-  for &lookback in proposed_lookbacks {
+  // Each candidate's score is packed as `goodness << 4 | (last index - index)`
+  // so that a single max reduction picks the highest goodness, breaking ties
+  // toward the earliest proposal. Scoring every candidate up front and
+  // reducing afterwards keeps the loop free of a serial compare chain.
+  let mut scores = [0_u32; PROPOSED_LOOKBACKS];
+  for (idx, &lookback) in proposed_lookbacks.iter().enumerate() {
     // SAFETY: each `lookback` comes from `proposed_lookbacks`, whose entries
     // are initialised to `(k+1).min(state_n) >= 1` and subsequently updated
-    // only to values in `[1, window_n]`.  `window_n <= lookback_counts.len()`,
-    // so `lookback - 1 < lookback_counts.len()`.  `i >= state_n >= lookback`,
+    // only to values in `[1, window_n]`.  `window_n <= lookback_goodnesses.len()`,
+    // so `lookback - 1 < lookback_goodnesses.len()`.  `i >= state_n >= lookback`,
     // so `i - lookback` doesn't underflow and stays in `[0, latents.len())`.
-    let (lookback_count, other) = unsafe {
+    let (lookback_goodness, other) = unsafe {
       (
-        *lookback_counts.get_unchecked(lookback - 1),
+        *lookback_goodnesses.get_unchecked(lookback - 1),
         *latents.get_unchecked(i - lookback),
       )
     };
-    let lookback_goodness = Bitlen::BITS - lookback_count.leading_zeros();
     let delta = L::min(l.wrapping_sub(other), other.wrapping_sub(l));
-    let delta_goodness = delta.leading_zeros();
-    let goodness = lookback_goodness + delta_goodness;
-    if goodness > best_goodness {
-      best_goodness = goodness;
-      best_lookback = lookback;
-    }
+    let goodness = lookback_goodness as Bitlen + delta.leading_zeros();
+    scores[idx] = (goodness << 4) | (PROPOSED_LOOKBACKS - 1 - idx) as u32;
   }
-  best_lookback
+
+  let best_score = scores.iter().copied().max().unwrap();
+  let best_idx = PROPOSED_LOOKBACKS - 1 - (best_score & 0xf) as usize;
+  proposed_lookbacks[best_idx]
 }
 
 #[inline(never)]
@@ -116,10 +120,14 @@ pub fn choose_lookbacks<L: Latent>(
     "we do not support tiny windows during compression"
   );
 
-  let mut lookback_counts = vec![1_u32; window_n.min(latents.len())];
+  let n_lookbacks = window_n.min(latents.len());
+  let mut lookback_counts = vec![1_u32; n_lookbacks];
+  // `lookback_goodnesses[j]` is always the bit width of `lookback_counts[j]`.
+  // Keeping it precomputed and narrow makes the hot inner loop much cheaper.
+  let mut lookback_goodnesses = vec![1_u8; n_lookbacks];
   let mut lookbacks = Vec::with_capacity(latents.len() - state_n);
   let uninit_lookbacks = lookbacks.spare_capacity_mut();
-  let mut idx_hash_table = vec![0_usize; COARSENESSES.len() * hash_table_n];
+  let mut idx_hash_table = vec![0_u32; COARSENESSES.len() * hash_table_n];
   let mut proposed_lookbacks = array::from_fn::<_, PROPOSED_LOOKBACKS, _>(|i| (i + 1).min(state_n));
   let mut best_lookback = 1;
   let mut repeating_lookback_idx: usize = 0;
@@ -142,7 +150,7 @@ pub fn choose_lookbacks<L: Latent>(
       i,
       latents,
       &proposed_lookbacks,
-      &mut lookback_counts,
+      &lookback_goodnesses,
     );
     if new_best_lookback != best_lookback {
       repeating_lookback_idx += 1;
@@ -151,7 +159,11 @@ pub fn choose_lookbacks<L: Latent>(
       new_best_lookback;
     best_lookback = new_best_lookback;
     uninit_lookbacks[i - state_n] = MaybeUninit::new(best_lookback as DeltaLookback);
-    lookback_counts[best_lookback - 1] += 1;
+    let count = &mut lookback_counts[best_lookback - 1];
+    *count += 1;
+    if count.is_power_of_two() {
+      lookback_goodnesses[best_lookback - 1] += 1;
+    }
   }
 
   unsafe { lookbacks.set_len(latents.len() - state_n) };
